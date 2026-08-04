@@ -5,16 +5,17 @@ coverage by sending a single message — no login, no contact setup, no administ
 
 ```
 you:    test
-STO-1:  SNR 6.5 RSSI -92 2h A3,1B
-STO-2:  SNR -4.0 RSSI -104 0h direct
+STO-1:  [louie] SNR 6.5 RSSI -92 2h A3,1B
+STO-2:  [louie] SNR -4.0 RSSI -104 0h direct
 ```
 
 The reply gives the SNR and RSSI the repeater heard you at, the hop count, and the hex
 hashes of the repeaters your message travelled through.
 
 **It is off by default, and it should stay off unless you have read this page.** Every
-repeater in range answers the same trigger, so one message becomes one flood reply per
-repeater. That is why replies are only sent for region-scoped requests.
+repeater in range answers the same trigger, so a request from more than one hop away becomes
+one flood reply per repeater. `autoreply.hops` is what bounds that, and the reply carries
+the requester's name in brackets so several arriving together can be told apart.
 
 ## Setup
 
