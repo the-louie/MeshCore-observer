@@ -1,3 +1,68 @@
+# 📡 Special build — Observer + Repeater Auto-Reply
+
+> This is the MQTT Observer firmware with one addition: **a repeater can answer a keyword on
+> a channel with a signal report.** Anyone can check coverage by sending a single message —
+> no login, no contact setup, no administration.
+
+```
+you        test
+STO-1      SNR 6.5 RSSI -92 0h direct
+STO-2      SNR -4.0 RSSI -104 2h A3,1B
+```
+
+You get the SNR and RSSI each repeater heard you at, how many hops away it is, and the hex
+hashes of the repeaters your message travelled through.
+
+### Enabling it
+
+The feature ships **off**. Naming a channel is what switches it on — there is no
+`set autoreply on`:
+
+```
+set autoreply.channel #test-JKG
+```
+
+Then add a channel of the same name in your client and send `test` to it. That is the whole
+setup for a range check.
+
+### Settings
+
+| Command | Default | What it does |
+|---|---|---|
+| `set autoreply.channel <#name>` | *(empty — off)* | The channel to listen on. Must start with `#`. An empty value turns the feature off. |
+| `set autoreply.hops <0-63>` | `8` | How many hops away a request may be and still get an answer. `0` = direct neighbours only. |
+| `get autoreply` | — | Current state, in one line. |
+| `get autoreply.channel` / `get autoreply.hops` | — | Read either setting back. |
+
+The trigger word is `test`, and it is case-insensitive — `test`, `Test` and `TEST` all work.
+Override it at build time with `-D AUTOREPLY_KEYWORD='"..."'`.
+
+> **The channel name is case-sensitive.** It is hashed exactly as typed, so `#test-JKG` and
+> `#test-jkg` are different channels. A mismatch is silent — the repeater simply never hears
+> you, which looks identical to being out of range. Since MQTT settings force the IATA code
+> to upper case, an upper-case suffix such as `#test-JKG` is the least surprising convention.
+
+### Being a good neighbour
+
+Every repeater in range answers the same message, so this is deliberately conservative:
+
+* **In direct range** — the reply is sent zero-hop. One packet, which no repeater will
+  ever retransmit.
+* **Further away** — the request must carry a region scope, and the reply stays inside that
+  same scope. An unscoped request from multiple hops away gets **no answer at all**, because
+  reaching you would mean flooding the whole mesh.
+* Replies are rate limited to **2 every 5 minutes** per repeater, and staggered by a random
+  delay so neighbouring repeaters do not transmit on top of each other.
+* `#public`, `#test` and `#bot` are rejected — they are shared mesh-wide. Use a regional
+  name, such as your IATA code.
+
+If several of your repeaters cover the same area, consider enabling this on only one of
+them, and don't enable it on a channel another bot already answers.
+
+📖 Full details, flashing offsets and the test procedure: **[docs/autoreply.md](./docs/autoreply.md)**
+
+---
+
 ## About MeshCore
 
 MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.
