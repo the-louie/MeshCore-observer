@@ -973,7 +973,11 @@ void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::Gro
   // retransmit. Further away, we can only reply within the scope of the request.
   bool zero_hop = (packet->getPathHashCount() == 0);
   bool scoped = (recv_pkt_region != NULL && !recv_pkt_region->isWildcard());
-  if (!zero_hop && !scoped) return;
+  if (!zero_hop && !scoped) {
+    MESH_DEBUG_PRINTLN("AutoReply: ignored, %d hops away and un-scoped - a reply would have "
+                       "to flood the mesh", (uint32_t) packet->getPathHashCount());
+    return;
+  }
 
   uint8_t temp[AUTOREPLY_MAX_PAYLOAD];
   int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,
@@ -985,11 +989,15 @@ void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::Gro
   if (reply) {
     // random delay (widened x4), as multiple repeaters can respond to this
     uint32_t delay_millis = getRetransmitDelay(reply) * 4;
+    MESH_DEBUG_PRINTLN("AutoReply: sending %s reply in %d ms", zero_hop ? "zero-hop" : "scoped",
+                       (uint32_t) delay_millis);
     if (zero_hop) {
       sendZeroHop(reply, delay_millis);
     } else {
       sendFloodReply(reply, delay_millis, packet->getPathHashSize());
     }
+  } else {
+    MESH_DEBUG_PRINTLN("AutoReply: could not build reply packet, pool empty");
   }
 }
 
