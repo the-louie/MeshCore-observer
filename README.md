@@ -6,8 +6,8 @@
 
 ```
 you        test
-STO-1      SNR 6.5 RSSI -92 0h direct
-STO-2      SNR -4.0 RSSI -104 2h A3,1B
+STO-1      [louie] SNR 6.5 RSSI -92 0h direct
+STO-2      [louie] SNR -4.0 RSSI -104 2h A3,1B
 ```
 
 You get the SNR and RSSI each repeater heard you at, how many hops away it is, and the hex

@@ -309,9 +309,18 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   memcpy(dest, &timestamp, 4);
   dest[4] = (TXT_TYPE_PLAIN << 2);
 
-  // bounded, as node_name and the path can both be long
+  // echo the requester's name back, so they can pick their reply out of several
+  // arriving together. Bounded, as the name and the path can both be long.
+  char who[AUTOREPLY_MAX_SENDER + 4];
+  if (sender_len > 0) {
+    int n = sender_len > AUTOREPLY_MAX_SENDER ? AUTOREPLY_MAX_SENDER : (int) sender_len;
+    snprintf(who, sizeof(who), "[%.*s] ", n, sender);
+  } else {
+    who[0] = 0;   // no name prefix in the request, so nothing to echo
+  }
+
   char* out = (char *) &dest[5];
-  snprintf(out, AUTOREPLY_MAX_TEXT, "%s: SNR %s RSSI %d %dh %s", node_name,
+  snprintf(out, AUTOREPLY_MAX_TEXT, "%s: %sSNR %s RSSI %d %dh %s", node_name, who,
            StrHelper::ftoa(req->getSNR()), (int) rssi, (uint32_t) hop_count, path_hex);
 
   MESH_DEBUG_PRINTLN("AutoReply: replying '%s'", out);

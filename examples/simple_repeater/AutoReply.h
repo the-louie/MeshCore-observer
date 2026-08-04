@@ -10,7 +10,9 @@
   #define AUTOREPLY_KEYWORD   "test"
 #endif
 
-#define AUTOREPLY_MAX_TEXT    96
+#define AUTOREPLY_MAX_TEXT    112
+// the requester's name is echoed back so they can pick their reply out of several
+#define AUTOREPLY_MAX_SENDER  16
 #define AUTOREPLY_MAX_PAYLOAD (5 + AUTOREPLY_MAX_TEXT)   // timestamp + flags + text
 
 // how many replies this repeater will send in total, per AUTOREPLY_WINDOW_SECS
