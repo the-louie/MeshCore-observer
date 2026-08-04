@@ -13,6 +13,13 @@
 #define AUTOREPLY_MAX_TEXT    96
 #define AUTOREPLY_MAX_PAYLOAD (5 + AUTOREPLY_MAX_TEXT)   // timestamp + flags + text
 
+// how many replies this repeater will send in total, per AUTOREPLY_WINDOW_SECS
+#define AUTOREPLY_MAX_REPLIES 10
+// how long one sender must wait before being answered again
+#define AUTOREPLY_WINDOW_SECS 300
+// senders remembered for the per-sender cooldown (oldest is evicted)
+#define AUTOREPLY_MAX_SENDERS 32
+
 /**
  * \brief  Replies to a keyword on one hashtag channel, with a signal + path report.
  *
@@ -32,9 +39,19 @@ class AutoReply {
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
 
+  // ring of recently answered senders, so one person retrying cannot use up
+  // everyone else's share of the global limit
+  struct SenderEntry {
+    uint32_t id;          // hash of the sender name, 0 = unused slot
+    uint32_t last_reply;
+  };
+  SenderEntry _senders[AUTOREPLY_MAX_SENDERS];
+  uint8_t _next_sender;
+
   void deriveChannel();
   void load();
   void save();
+  bool senderAllowed(const char* name, size_t name_len, uint32_t now);
 
 public:
   AutoReply();
