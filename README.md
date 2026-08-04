@@ -50,8 +50,11 @@ Every repeater in range answers the same message, so this is deliberately conser
 * **Further away** — the reply has to be flooded, and every repeater that heard the request
   answers. It stays inside the request's region scope if it had one. **`set autoreply.hops`
   is what bounds this** — keep it low (`0` = direct neighbours only, and can never flood).
-* Replies are rate limited to **2 every 5 minutes** per repeater, and staggered by a random
-  delay so neighbouring repeaters do not transmit on top of each other.
+* Rate limited two ways per repeater: **one reply per sender every 5 minutes** (the last 32
+  senders are remembered), and **10 replies every 5 minutes** in total. The per-sender check
+  runs first, so one person retrying cannot lock out everyone else.
+* Replies are staggered by a random delay so neighbouring repeaters do not transmit on top
+  of each other.
 * `#public`, `#test` and `#bot` are rejected — they are shared mesh-wide. Use a regional
   name, such as your IATA code.
 

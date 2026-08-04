@@ -109,7 +109,7 @@ What bounds it:
 
 * `autoreply.hops` — the single most effective control. `0` answers only direct neighbours
   and can never flood at all. A small value such as `2` or `3` keeps replies regional.
-* The 2-per-5-minute rate limit per repeater.
+* The rate limits (below).
 * Each repeater's own `flood.max` / `flood.max.unscoped`.
 
 Scoping the request is still much cheaper, because the reply stays inside that scope.
@@ -164,7 +164,16 @@ Be honest with yourself about the traffic before enabling this:
 
 - One trigger produces **up to one flood reply per repeater in range**, each propagating
   across the configured scope.
-- Replies are rate limited to 2 per 5 minutes per repeater.
+- Two rate limits apply, both per repeater:
+  - **Per sender** — one reply per sender per 5 minutes. The last 32 senders are remembered
+    in a ring; the oldest is forgotten when a 33rd appears. Senders are identified by the
+    name prefix a group message carries, folded to lower case, so this is a courtesy limit
+    rather than a security control — a name is trivially spoofed, and two people using the
+    same name share a slot.
+  - **Global** — 10 replies per 5 minutes in total. The per-sender check runs first, so one
+    person retrying cannot spend everyone else's share.
+  - Both are fixed windows, not cooldowns: the budget refills all at once when the window
+    ends, and the window starts at the first reply after an idle gap.
 - Replies are staggered by a random delay, scaled by `f_txdelay`, so nearby repeaters do
   not transmit on top of each other. Setting `f_txdelay` to `0` removes that stagger.
 - Only an exact, case-insensitive match on the keyword triggers a reply, so ordinary chat

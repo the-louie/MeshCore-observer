@@ -46,9 +46,43 @@ static bool equalsIgnoreCase(const char* a, const char* b) {
 }
 
 AutoReply::AutoReply()
-  : _fs(NULL), _hops(8), _ready(false), _limiter(2, 300)   // max 2 replies every 5 minutes
+  : _fs(NULL), _hops(8), _ready(false), _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _channel_name[0] = 0;
+  memset(_senders, 0, sizeof(_senders));
+  _next_sender = 0;
+}
+
+// case-folded FNV-1a, so 'Louie' and 'louie' are the same sender
+static uint32_t hashName(const char* s, size_t len) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < len; i++) {
+    char c = (s[i] >= 'A' && s[i] <= 'Z') ? s[i] + 32 : s[i];
+    h ^= (uint8_t) c;
+    h *= 16777619u;
+  }
+  return h;
+}
+
+bool AutoReply::senderAllowed(const char* name, size_t name_len, uint32_t now) {
+  uint32_t id = hashName(name, name_len);
+
+  for (int i = 0; i < AUTOREPLY_MAX_SENDERS; i++) {
+    if (_senders[i].id == id) {
+      // guard against the clock going backwards, which would look like a huge gap
+      if (now >= _senders[i].last_reply && now - _senders[i].last_reply < AUTOREPLY_WINDOW_SECS) {
+        return false;
+      }
+      _senders[i].last_reply = now;
+      return true;
+    }
+  }
+
+  // not seen before, so take the next slot in the ring, evicting whoever is oldest
+  _senders[_next_sender].id = id;
+  _senders[_next_sender].last_reply = now;
+  _next_sender = (_next_sender + 1) % AUTOREPLY_MAX_SENDERS;
+  return true;
 }
 
 void AutoReply::begin(FILESYSTEM* fs) {
@@ -220,8 +254,16 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   memcpy(text, &data[5], text_len);
   text[text_len] = 0;
 
+  // the name prefix is the only sender identity a group text carries
+  const char* sender = text;
+  size_t sender_len = 0;
   char* msg = strstr(text, ": ");
-  msg = msg ? msg + 2 : text;
+  if (msg) {
+    sender_len = msg - text;
+    msg += 2;
+  } else {
+    msg = text;
+  }
 
   while (*msg == ' ') msg++;                          // trim, so " test " still triggers
   char* end = msg + strlen(msg);
@@ -233,9 +275,16 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
     return 0;
   }
 
-  // only count actual triggers against the limit
+  // Per-sender first, so someone retrying cannot spend everyone else's share of
+  // the global budget. Only real triggers are charged against either limit.
+  if (!senderAllowed(sender, sender_len, timestamp)) {
+    MESH_DEBUG_PRINTLN("AutoReply: '%.*s' was already answered in the last %d s",
+                       (int) sender_len, sender, (uint32_t) AUTOREPLY_WINDOW_SECS);
+    return 0;
+  }
   if (!_limiter.allow(timestamp)) {
-    MESH_DEBUG_PRINTLN("AutoReply: rate limited, already answered twice in the last 5 minutes");
+    MESH_DEBUG_PRINTLN("AutoReply: rate limited, %d replies already sent in the last %d s",
+                       (uint32_t) AUTOREPLY_MAX_REPLIES, (uint32_t) AUTOREPLY_WINDOW_SECS);
     return 0;
   }
 
