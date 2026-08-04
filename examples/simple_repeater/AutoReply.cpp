@@ -60,6 +60,9 @@ void AutoReply::deriveChannel() {
   mesh::Utils::sha256(_channel.secret, 16, (const uint8_t *) _channel_name, strlen(_channel_name));
   mesh::Utils::sha256(_channel.hash, sizeof(_channel.hash), _channel.secret, 16);
   _ready = true;
+
+  MESH_DEBUG_PRINTLN("AutoReply: listening on '%s' (channel hash %02X), keyword '%s', max %d hops",
+                     _channel_name, (uint32_t) _channel.hash[0], AUTOREPLY_KEYWORD, (uint32_t) _hops);
 }
 
 void AutoReply::load() {
@@ -93,8 +96,16 @@ void AutoReply::save() {
 
 int AutoReply::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
   if (!_ready || max_matches < 1) return 0;
-  if (memcmp(hash, _channel.hash, sizeof(_channel.hash)) != 0) return 0;
+  if (memcmp(hash, _channel.hash, sizeof(_channel.hash)) != 0) {
+    // by far the most common cause of "it does not answer": the name differs,
+    // and the name is hashed exactly as typed, so case matters
+    MESH_DEBUG_PRINTLN("AutoReply: not our channel - heard hash %02X, '%s' is %02X",
+                       (uint32_t) hash[0], _channel_name, (uint32_t) _channel.hash[0]);
+    return 0;
+  }
 
+  MESH_DEBUG_PRINTLN("AutoReply: channel '%s' matched (hash %02X)", _channel_name,
+                     (uint32_t) _channel.hash[0]);
   channels[0] = _channel;
   return 1;
 }
@@ -172,11 +183,21 @@ bool AutoReply::handleCommand(const char* command, char* reply) {
 int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t len,
                           const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest) {
   if (!_ready) return 0;
-  if (len < 6) return 0;                              // timestamp + flags + at least one char
-  if ((data[4] >> 2) != TXT_TYPE_PLAIN) return 0;     // only plain chat text
+  if (len < 6) {                                      // timestamp + flags + at least one char
+    MESH_DEBUG_PRINTLN("AutoReply: ignored, message too short (len=%d)", (uint32_t) len);
+    return 0;
+  }
+  if ((data[4] >> 2) != TXT_TYPE_PLAIN) {             // only plain chat text
+    MESH_DEBUG_PRINTLN("AutoReply: ignored, not plain text (txt_type=%d)", (uint32_t)(data[4] >> 2));
+    return 0;
+  }
 
   uint8_t hop_count = req->getPathHashCount();
-  if (hop_count > _hops) return 0;                    // came from too far away
+  if (hop_count > _hops) {                            // came from too far away
+    MESH_DEBUG_PRINTLN("AutoReply: ignored, %d hops away (max %d)", (uint32_t) hop_count,
+                       (uint32_t) _hops);
+    return 0;
+  }
 
   // group text is "<sender>: <message>", see BaseChatMesh::sendGroupMessage()
   char text[AUTOREPLY_MAX_TEXT];
@@ -193,10 +214,16 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   while (end > msg && (end[-1] == ' ' || end[-1] == '\n' || end[-1] == '\r')) end--;
   *end = 0;
 
-  if (!equalsIgnoreCase(msg, AUTOREPLY_KEYWORD)) return 0;
+  if (!equalsIgnoreCase(msg, AUTOREPLY_KEYWORD)) {
+    MESH_DEBUG_PRINTLN("AutoReply: not the keyword - got '%s', want '%s'", msg, AUTOREPLY_KEYWORD);
+    return 0;
+  }
 
   // only count actual triggers against the limit
-  if (!_limiter.allow(timestamp)) return 0;
+  if (!_limiter.allow(timestamp)) {
+    MESH_DEBUG_PRINTLN("AutoReply: rate limited, already answered twice in the last 5 minutes");
+    return 0;
+  }
 
   // the repeaters this request came through (flood routing appends each hop)
   char path_hex[MAX_PATH_HASHES_SHOWN * 9 + 4];
@@ -223,5 +250,7 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   char* out = (char *) &dest[5];
   snprintf(out, AUTOREPLY_MAX_TEXT, "%s: SNR %s RSSI %d %dh %s", node_name,
            StrHelper::ftoa(req->getSNR()), (int) rssi, (uint32_t) hop_count, path_hex);
+
+  MESH_DEBUG_PRINTLN("AutoReply: replying '%s'", out);
   return 5 + strlen(out);
 }
