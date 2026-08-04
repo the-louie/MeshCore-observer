@@ -964,6 +964,29 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
+int MyMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel channels[], int max_matches) {
+  return auto_reply.searchChannelsByHash(hash, channels, max_matches);
+}
+
+void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel,
+                             uint8_t *data, size_t len) {
+  if (type != PAYLOAD_TYPE_GRP_TXT) return;
+  // every repeater in range hears this, so only answer requests that carry a region scope
+  if (recv_pkt_region == NULL || recv_pkt_region->isWildcard()) return;
+
+  uint8_t temp[AUTOREPLY_MAX_PAYLOAD];
+  int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,
+                                          radio_driver.getLastRSSI(),
+                                          getRTCClock()->getCurrentTimeUnique(), temp);
+  if (payload_len <= 0) return;
+
+  auto reply = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, temp, payload_len);
+  if (reply) {
+    // random delay (widened x4), as multiple repeaters can respond to this
+    sendFloodReply(reply, getRetransmitDelay(reply) * 4, packet->getPathHashSize());
+  }
+}
+
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
@@ -1113,6 +1136,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #endif
 
   acl.load(_fs, self_id);
+  auto_reply.begin(_fs);
   // TODO: key_store.begin();
   region_map.load(_fs);
 
@@ -1653,6 +1677,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (memcmp(command, "discover.scopes", 15) == 0) {
     strcpy(reply, "Err - neighbors not enabled in this build");
 #endif
+  } else if (auto_reply.handleCommand(command, reply)) {
+    // handled by the auto-reply feature
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
