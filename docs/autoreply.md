@@ -127,6 +127,37 @@ region allowf #test-STO
 Region keys are derived from the name in the same way, so `#test-STO` needs no key
 distribution either. See [CLI commands](cli_commands.md) for the full `region` syntax.
 
+## Possible improvement: reply direct along the reverse path
+
+The multi-hop case currently costs a flood reply per repeater in range. It should be
+possible to avoid flooding entirely by replying **direct along the reverse of the path the
+request arrived by** — one packet per hop, targeted, reaching the sender without touching
+the rest of the mesh. That would make `autoreply.hops` a range setting rather than a cost
+setting.
+
+The pieces are already there:
+
+* A flood packet accumulates the hash of every repeater it crosses, appended in order
+  (`self_id.copyHashTo(&packet->path[n * hash_size], ...)`, `src/Mesh.cpp:349`). So an
+  inbound request carries the full route from the sender to us.
+* Direct routing forwards *any* payload type, group text included: a `ROUTE_TYPE_DIRECT`
+  packet with a non-empty path is matched against `path[0]`, forwarded, and the hop removes
+  itself (`src/Mesh.cpp:78-108`). When the path is exhausted the payload is handled
+  normally, so any node in range holding the channel key will decrypt it.
+* `sendDirect(pkt, path, path_len, delay)` already takes an explicit path.
+
+What needs care before trusting it:
+
+* **Order.** The inbound path is `[R1, R2, R3]` from the sender's side, where `R1` is the
+  sender's neighbour. Sending back means `[R3, R2, R1]`, so the path must be reversed —
+  unlike a client's `out_path`, which is used as-is.
+* **Hash size.** `getPathHashSize()` is 1-4 bytes per entry and the reversal must move whole
+  entries, not bytes. Keep within `MAX_PATH_SIZE`.
+* **Asymmetry.** A route that worked one way may not work back; a flood reply finds its own
+  way, a direct reply does not. A fallback is probably still wanted.
+* **Verify on hardware** that a direct-routed `PAYLOAD_TYPE_GRP_TXT` is displayed by stock
+  clients — group messages are normally flooded, so this path is unexercised.
+
 ## What it costs
 
 Be honest with yourself about the traffic before enabling this:
