@@ -96,16 +96,28 @@ two ways, and stays silent if it can do neither:
 
 | Request arrived | Reply |
 |---|---|
-| **0 hops** (you are in direct range) | Sent zero-hop. One packet, and no repeater will ever retransmit it. Needs no scope — this is the ordinary range check. |
+| **0 hops** (you are in direct range) | Sent zero-hop. One packet, and no repeater will ever retransmit it. Costs the mesh nothing. |
 | **1+ hops, region-scoped** | Flooded back inside that same scope only. |
-| **1+ hops, unscoped** | **Nothing.** Reaching you would mean flooding the whole mesh. |
+| **1+ hops, unscoped** | Flooded. **This is the expensive case** — see below. |
 
-Note that a stock client has no per-channel scope setting — it applies a device-wide default
-scope, and sends unscoped when none is set (see the `// TODO: have per-channel send_scope`
-in the companion firmware). So in practice the multi-hop path needs a deliberately
-configured default scope on the sending device.
+**Understand the multi-hop cost before raising `autoreply.hops`.** A request that arrives
+from several hops away can only be answered by flooding, and *every* repeater that heard it
+answers. One `test` therefore becomes one flood packet per repeater in range, each
+propagating as far as `flood.max` allows. On a busy mesh that is real airtime.
 
-To use the multi-hop path, pair the channel with a region of the same name:
+What bounds it:
+
+* `autoreply.hops` — the single most effective control. `0` answers only direct neighbours
+  and can never flood at all. A small value such as `2` or `3` keeps replies regional.
+* The 2-per-5-minute rate limit per repeater.
+* Each repeater's own `flood.max` / `flood.max.unscoped`.
+
+Scoping the request is still much cheaper, because the reply stays inside that scope.
+Note a stock client has no per-channel scope setting — it applies a device-wide default
+scope and sends unscoped when none is set (see the `// TODO: have per-channel send_scope`
+in the companion firmware), so unscoped is what most meshes actually carry.
+
+To use the cheaper scoped path, pair the channel with a region of the same name:
 
 ```
 region def #test-STO

@@ -46,10 +46,10 @@ Override it at build time with `-D AUTOREPLY_KEYWORD='"..."'`.
 Every repeater in range answers the same message, so this is deliberately conservative:
 
 * **In direct range** — the reply is sent zero-hop. One packet, which no repeater will
-  ever retransmit.
-* **Further away** — the request must carry a region scope, and the reply stays inside that
-  same scope. An unscoped request from multiple hops away gets **no answer at all**, because
-  reaching you would mean flooding the whole mesh.
+  ever retransmit, so it costs the mesh nothing.
+* **Further away** — the reply has to be flooded, and every repeater that heard the request
+  answers. It stays inside the request's region scope if it had one. **`set autoreply.hops`
+  is what bounds this** — keep it low (`0` = direct neighbours only, and can never flood).
 * Replies are rate limited to **2 every 5 minutes** per repeater, and staggered by a random
   delay so neighbouring repeaters do not transmit on top of each other.
 * `#public`, `#test` and `#bot` are rejected — they are shared mesh-wide. Use a regional
