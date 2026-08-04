@@ -29,6 +29,12 @@ static File openWrite(FILESYSTEM* fs, const char* filename) {
   #endif
 }
 
+static void toLowerStr(char* s) {
+  for (; *s; s++) {
+    if (*s >= 'A' && *s <= 'Z') *s += 32;
+  }
+}
+
 static bool equalsIgnoreCase(const char* a, const char* b) {
   while (*a && *b) {
     char ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
@@ -76,6 +82,7 @@ void AutoReply::load() {
       file.read((uint8_t *) _channel_name, sizeof(_channel_name));
       file.read(&_hops, 1);
       _channel_name[sizeof(_channel_name) - 1] = 0;
+      toLowerStr(_channel_name);   // migrate a name saved before names were folded
     }
     file.close();
   }
@@ -128,17 +135,24 @@ bool AutoReply::handleCommand(const char* command, char* reply) {
       strcpy(reply, "Err - name must start with #");
       return true;
     }
-    for (int i = 0; banned_channels[i]; i++) {
-      if (equalsIgnoreCase(name, banned_channels[i])) {
-        sprintf(reply, "Err - %s is shared, use a regional name", banned_channels[i]);
-        return true;
-      }
-    }
     if (strlen(name) >= sizeof(_channel_name)) {
       strcpy(reply, "Err - name too long");
       return true;
     }
-    StrHelper::strncpy(_channel_name, name, sizeof(_channel_name));
+
+    // Clients only accept lower-case channel names, so fold the name here: an
+    // upper-case name would hash to a channel nobody can actually join.
+    char tmp[sizeof(_channel_name)];
+    StrHelper::strncpy(tmp, name, sizeof(tmp));
+    toLowerStr(tmp);
+
+    for (int i = 0; banned_channels[i]; i++) {
+      if (strcmp(tmp, banned_channels[i]) == 0) {
+        sprintf(reply, "Err - %s is shared, use a regional name", banned_channels[i]);
+        return true;
+      }
+    }
+    StrHelper::strncpy(_channel_name, tmp, sizeof(_channel_name));
     deriveChannel();
     save();
     sprintf(reply, "OK - %s", _channel_name);

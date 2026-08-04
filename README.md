@@ -37,10 +37,9 @@ setup for a range check.
 The trigger word is `test`, and it is case-insensitive — `test`, `Test` and `TEST` all work.
 Override it at build time with `-D AUTOREPLY_KEYWORD='"..."'`.
 
-> **The channel name is case-sensitive.** It is hashed exactly as typed, so `#test-JKG` and
-> `#test-jkg` are different channels. A mismatch is silent — the repeater simply never hears
-> you, which looks identical to being out of range. Since MQTT settings force the IATA code
-> to upper case, an upper-case suffix such as `#test-JKG` is the least surprising convention.
+> **Channel names are folded to lower case.** Clients only accept lower-case channel names,
+> so `set autoreply.channel #test-JKG` is stored and used as `#test-jkg`. The command echoes
+> back the name it actually saved, which is what you must type in your client.
 
 ### Being a good neighbour
 
