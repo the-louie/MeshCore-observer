@@ -53,14 +53,16 @@ set autoreply.channel
 — so there is no PSK to configure or share. Any client that adds a channel of the same name
 gets the same key.
 
-**Note:** the name is **case-sensitive**. It is hashed exactly as typed, so `#test-STO` and
-`#test-sto` are different channels with different keys. A mismatch produces no error on
-either side — the repeater is simply deaf to that channel, which looks identical to being
-out of range. The same applies to the region name. If you name channels after your IATA
-code, note that MQTT settings force the IATA code to upper case (`set mqtt.iata jkg` stores
-`JKG`), so an upper-case suffix such as `#test-JKG` is the least surprising convention.
+**Note:** the name is folded to **lower case** when you set it. The key is the hash of the
+name exactly as stored, and clients only accept lower-case channel names, so an upper-case
+name would produce a channel nobody could join. `set autoreply.channel #test-STO` therefore
+stores `#test-sto`, and the command echoes back what it saved — type that into your client.
 
-The trigger keyword itself is case-insensitive: `test`, `Test` and `TEST` all work.
+Region names are **not** folded, so if you pair the channel with a region for the multi-hop
+path, spell the region exactly the same on every node.
+
+The trigger keyword is case-insensitive: `test`, `Test` and `TEST` all work. Many phone
+keyboards capitalise the first letter, so this matters in practice.
 
 **Note:** `#public`, `#test` and `#bot` are rejected. They are shared mesh-wide, so a reply
 from every repeater on them is spam. Use a regional name, such as your IATA code.
