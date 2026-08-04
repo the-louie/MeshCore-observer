@@ -23,8 +23,11 @@ set autoreply.channel #test-STO
 set autoreply.hops 8
 ```
 
-Then, on the client side, add the `#test-STO` channel and give it the matching region
-scope. Sending `test` to that channel gets a reply from every repeater that heard it.
+Then add the `#test-STO` channel in your client and send `test` to it. Every repeater in
+direct range answers. Nothing else is needed for a range check.
+
+To also get answers from repeaters **more than one hop away**, the request has to carry a
+region scope — see [How far the reply travels](#how-far-the-reply-travels) below.
 
 To turn it back off:
 
@@ -50,6 +53,15 @@ set autoreply.channel
 — so there is no PSK to configure or share. Any client that adds a channel of the same name
 gets the same key.
 
+**Note:** the name is **case-sensitive**. It is hashed exactly as typed, so `#test-STO` and
+`#test-sto` are different channels with different keys. A mismatch produces no error on
+either side — the repeater is simply deaf to that channel, which looks identical to being
+out of range. The same applies to the region name. If you name channels after your IATA
+code, note that MQTT settings force the IATA code to upper case (`set mqtt.iata jkg` stores
+`JKG`), so an upper-case suffix such as `#test-JKG` is the least surprising convention.
+
+The trigger keyword itself is case-insensitive: `test`, `Test` and `TEST` all work.
+
 **Note:** `#public`, `#test` and `#bot` are rejected. They are shared mesh-wide, so a reply
 from every repeater on them is spam. Use a regional name, such as your IATA code.
 
@@ -69,7 +81,7 @@ from every repeater on them is spam. Use a regional name, such as your IATA code
 
 - `get autoreply`
 
-## Why the region scope is required
+## How far the reply travels
 
 A channel name does not limit propagation. Repeaters forward on the packet header alone —
 route type, hop count against `flood.max`, transport code — and the channel lives in the
@@ -77,11 +89,21 @@ encrypted payload, which a repeater does not read. A message to `#test-STO` ther
 exactly the same airtime, over exactly the same hops, as one to `#test`. Naming the channel
 per region keeps it out of other people's message lists; it does not keep it off their air.
 
-What does limit propagation is the region transport code. So the repeater **only answers a
-request that carries a region scope**, and sends its reply back into that same scope. An
-unscoped `test` is silently ignored — no reply, from anyone.
+What does limit propagation is the region transport code. So the repeater answers in one of
+two ways, and stays silent if it can do neither:
 
-Pair the channel with a region of the same name:
+| Request arrived | Reply |
+|---|---|
+| **0 hops** (you are in direct range) | Sent zero-hop. One packet, and no repeater will ever retransmit it. Needs no scope — this is the ordinary range check. |
+| **1+ hops, region-scoped** | Flooded back inside that same scope only. |
+| **1+ hops, unscoped** | **Nothing.** Reaching you would mean flooding the whole mesh. |
+
+Note that a stock client has no per-channel scope setting — it applies a device-wide default
+scope, and sends unscoped when none is set (see the `// TODO: have per-channel send_scope`
+in the companion firmware). So in practice the multi-hop path needs a deliberately
+configured default scope on the sending device.
+
+To use the multi-hop path, pair the channel with a region of the same name:
 
 ```
 region def #test-STO

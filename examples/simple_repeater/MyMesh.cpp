@@ -967,8 +967,13 @@ int MyMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel channel
 void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel,
                              uint8_t *data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_TXT) return;
-  // every repeater in range hears this, so only answer requests that carry a region scope
-  if (recv_pkt_region == NULL || recv_pkt_region->isWildcard()) return;
+
+  // Every repeater in range hears this, so we must not answer in a way that floods.
+  // A zero-hop request can be answered zero-hop: one packet, which no repeater will
+  // retransmit. Further away, we can only reply within the scope of the request.
+  bool zero_hop = (packet->getPathHashCount() == 0);
+  bool scoped = (recv_pkt_region != NULL && !recv_pkt_region->isWildcard());
+  if (!zero_hop && !scoped) return;
 
   uint8_t temp[AUTOREPLY_MAX_PAYLOAD];
   int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,
@@ -979,7 +984,12 @@ void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::Gro
   auto reply = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, temp, payload_len);
   if (reply) {
     // random delay (widened x4), as multiple repeaters can respond to this
-    sendFloodReply(reply, getRetransmitDelay(reply) * 4, packet->getPathHashSize());
+    uint32_t delay_millis = getRetransmitDelay(reply) * 4;
+    if (zero_hop) {
+      sendZeroHop(reply, delay_millis);
+    } else {
+      sendFloodReply(reply, delay_millis, packet->getPathHashSize());
+    }
   }
 }
 
