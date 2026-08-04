@@ -100,8 +100,10 @@ int AutoReply::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel chan
 }
 
 bool AutoReply::handleCommand(const char* command, char* reply) {
-  if (memcmp(command, "set autoreply.channel ", 22) == 0) {
-    const char* name = &command[22];
+  // trailing space is optional, so a bare 'set autoreply.channel' turns it off
+  if (memcmp(command, "set autoreply.channel", 21) == 0 &&
+      (command[21] == 0 || command[21] == ' ')) {
+    const char* name = &command[21];
     while (*name == ' ') name++;
 
     if (*name == 0) {   // blank name turns the feature off
@@ -158,7 +160,8 @@ bool AutoReply::handleCommand(const char* command, char* reply) {
     if (_ready) {
       sprintf(reply, "> %s '%s' max %d hops", _channel_name, AUTOREPLY_KEYWORD, (uint32_t) _hops);
     } else {
-      strcpy(reply, "> off");
+      // there is no 'set autoreply on' - naming a channel is what enables it
+      strcpy(reply, "> off - use: set autoreply.channel #name");
     }
     return true;
   }
