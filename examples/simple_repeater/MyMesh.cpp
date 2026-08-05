@@ -964,12 +964,22 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
-int MyMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel channels[], int max_matches) {
-  return auto_reply.searchChannelsByHash(hash, channels, max_matches);
+// The auto-reply channel is '#test-<iata>', so it follows the observer region code.
+// Builds without the MQTT bridge have no region, and no auto-reply channel.
+const char* MyMesh::autoReplyRegion() const {
+#ifdef WITH_MQTT_BRIDGE
+  return _cli.getObserverPrefs()->mqtt_iata;
+#else
+  return NULL;
+#endif
 }
 
-void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel,
-                             uint8_t *data, size_t len) {
+int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
+  return auto_reply.searchChannelsByHash(autoReplyRegion(), hash, channels, max_matches);
+}
+
+void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
+                             uint8_t* data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_TXT) return;
 
   // A zero-hop request is answered zero-hop: one packet, which no repeater will
@@ -981,7 +991,7 @@ void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::Gro
   int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,
                                           radio_driver.getLastRSSI(),
                                           getRTCClock()->getCurrentTimeUnique(), temp);
-  if (payload_len <= 0) return;
+  if (payload_len == 0) return;
 
   auto reply = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, temp, payload_len);
   if (reply) {
@@ -990,7 +1000,7 @@ void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::Gro
     const char* how = zero_hop ? "zero-hop"
                     : (recv_pkt_region && !recv_pkt_region->isWildcard()) ? "scoped flood"
                     : "un-scoped flood";
-    MESH_DEBUG_PRINTLN("AutoReply: sending %s reply in %d ms", how, (uint32_t) delay_millis);
+    MESH_DEBUG_PRINTLN("AutoReply: sending %s reply in %d ms", how, (uint32_t)delay_millis);
     if (zero_hop) {
       sendZeroHop(reply, delay_millis);
     } else {
@@ -1691,8 +1701,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (memcmp(command, "discover.scopes", 15) == 0) {
     strcpy(reply, "Err - neighbors not enabled in this build");
 #endif
-  } else if (auto_reply.handleCommand(command, reply)) {
-    // handled by the auto-reply feature
+  } else if (auto_reply.handleCommand(autoReplyRegion(), command, reply)) {
+    // reply already filled in
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

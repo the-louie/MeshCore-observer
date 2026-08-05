@@ -268,6 +268,7 @@ protected:
   void onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx, const uint8_t* secret, uint8_t* data, size_t len) override;
   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
   void onControlDataRecv(mesh::Packet* packet) override;
+  const char* autoReplyRegion() const;
   int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
 

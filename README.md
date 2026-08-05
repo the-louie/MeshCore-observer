@@ -1,8 +1,13 @@
-# 📡 Special build — Observer + Repeater Auto-Reply
+# 📡 MeshCore Observer — with repeater auto-reply
 
-> This is the MQTT Observer firmware with one addition: **a repeater can answer a keyword on
-> a channel with a signal report.** Anyone can check coverage by sending a single message —
-> no login, no contact setup, no administration.
+**This is the standard [MeshCore Observer](https://observer.gessaman.com/) firmware, plus one
+feature.** Everything Observer does is still here and unchanged — MQTT uplink to all six
+broker slots, WiFi and timezone config, fault alerts, the web flasher config portal. If you
+already run an Observer repeater, nothing you have set up changes.
+
+The addition: **your repeaters answer the word `test` with a signal report.** Anyone in
+range can check coverage by sending one message. No login, no contact setup, no admin
+rights, nothing to install.
 
 ```
 you        test
@@ -10,58 +15,118 @@ STO-1      [louie] SNR 6.5 RSSI -92 0h direct
 STO-2      [louie] SNR -4.0 RSSI -104 2h A3,1B
 ```
 
-You get the SNR and RSSI each repeater heard you at, how many hops away it is, and the hex
-hashes of the repeaters your message travelled through.
+Each repeater that hears you replies with the SNR and RSSI it heard you at, how far away it
+is in hops, and which repeaters your message travelled through. Your name comes back in
+brackets, so when several people test at once everyone can find their own reply.
 
-### Enabling it
+---
 
-The feature ships **off**. Naming a channel is what switches it on — there is no
-`set autoreply on`:
+## Turning it on — three steps
+
+**1. Flash a repeater with this firmware.** Grab the file for your board from this repo's
+[Releases](../../releases) page.
+
+* **Upgrading a node you already run?** Use the plain `….bin` at offset `0x10000` — it keeps
+  your settings, node identity, MQTT slots and WiFi credentials.
+* **Starting fresh, or unsure?** Use `…-merged.bin` at offset `0x0`. It wipes the device and
+  you set it up from scratch.
+
+**2. Connect a console.** USB serial at **115200 baud**, or the repeater's admin console in
+your MeshCore client app if you are already logged in to it remotely.
+
+**3. Type one command:**
 
 ```
-set autoreply.channel #test-JKG
+set autoreply on
 ```
 
-Then add a channel of the same name in your client and send `test` to it. That is the whole
-setup for a range check.
+That is it. Check it took:
 
-### Settings
+```
+get autoreply
+> on #test-sto 'test' max 8 hops
+```
+
+Now add the channel it named — `#test-sto` above — in your MeshCore client, send `test` to
+it, and every repeater in range answers.
+
+> **If `get autoreply` says `no region - set mqtt.iata`**, the node has no region code yet.
+> Set the airport code nearest you and the channel appears: `set mqtt.iata STO`. Observer
+> nodes that already publish to MQTT have this set, because it is what they publish under.
+
+To turn it off again: `set autoreply off`.
+
+## Settings
 
 | Command | Default | What it does |
 |---|---|---|
-| `set autoreply.channel <#name>` | *(empty — off)* | The channel to listen on. Must start with `#`. An empty value turns the feature off. |
+| `set autoreply on\|off` | `off` | Whether this repeater answers the trigger. |
 | `set autoreply.hops <0-63>` | `8` | How many hops away a request may be and still get an answer. `0` = direct neighbours only. |
 | `get autoreply` | — | Current state, in one line. |
-| `get autoreply.channel` / `get autoreply.hops` | — | Read either setting back. |
+| `get autoreply.channel` | — | The channel name. **Read-only** — it follows `set mqtt.iata`. |
+| `get autoreply.hops` | — | Read the hop limit back. |
 
-The trigger word is `test`, and it is case-insensitive — `test`, `Test` and `TEST` all work.
-Override it at build time with `-D AUTOREPLY_KEYWORD='"..."'`.
+The trigger word is `test`, case-insensitive — `test`, `Test` and `TEST` all work, which
+matters because phone keyboards like to capitalise the first letter. Override it at build
+time with `-D AUTOREPLY_KEYWORD='"..."'`.
 
-> **Channel names are folded to lower case.** Clients only accept lower-case channel names,
-> so `set autoreply.channel #test-JKG` is stored and used as `#test-jkg`. The command echoes
-> back the name it actually saved, which is what you must type in your client.
+---
 
-### Being a good neighbour
+## Why the channel is `#test-<iata>` and nothing else
 
-Every repeater in range answers the same message, so this is deliberately conservative:
+You cannot choose the channel. It is always `#test-` followed by your node's region code, in
+lower case — `#test-sto`, `#test-jkg`. That is a deliberate restriction, for three reasons.
 
-* **In direct range** — the reply is sent zero-hop. One packet, which no repeater will
-  ever retransmit, so it costs the mesh nothing.
-* **Further away** — the reply has to be flooded, and every repeater that heard the request
-  answers. It stays inside the request's region scope if it had one. **`set autoreply.hops`
-  is what bounds this** — keep it low (`0` = direct neighbours only, and can never flood).
-* Rate limited two ways per repeater: **one reply per sender every 5 minutes** (the last 32
-  senders are remembered), and **10 replies every 5 minutes** in total. The per-sender check
-  runs first, so one person retrying cannot lock out everyone else.
-* Replies are staggered by a random delay so neighbouring repeaters do not transmit on top
-  of each other.
-* `#public`, `#test` and `#bot` are rejected — they are shared mesh-wide. Use a regional
-  name, such as your IATA code.
+**One badly chosen channel would spam the whole mesh.** Every repeater in range answers the
+same message. Point that at `#public`, `#test` or `#bot` — channels everybody carries — and
+one person typing `test` sets off a reply from every repeater that heard it, mesh-wide,
+forever. A region code can never produce one of those names, so the mistake is impossible to
+make rather than merely discouraged.
 
-If several of your repeaters cover the same area, consider enabling this on only one of
-them, and don't enable it on a channel another bot already answers.
+**A per-region channel keeps the traffic where it is useful.** Your coverage test is
+interesting to people near you and noise to everyone else. Naming the channel after the
+region keeps it out of other people's message lists.
 
-📖 Full details, flashing offsets and the test procedure: **[docs/autoreply.md](./docs/autoreply.md)**
+**There is nothing to distribute.** The channel key is the first 16 bytes of
+`sha256("#test-sto")`, so there is no PSK to generate, share or keep in sync. Anyone who
+knows the region code can join by typing the name into their client — that is the whole
+point, since the person testing coverage is usually a stranger to the repeater's owner.
+
+Lower case is not a style choice: clients only accept lower-case channel names, and the key
+is the hash of the name exactly as stored, so an upper-case name would hash to a channel
+nobody could join.
+
+## Why it will not flood your mesh
+
+Every repeater in range answers the same message, which is exactly the shape of a broadcast
+storm. Five mitigations keep it cheap:
+
+**Zero-hop replies when you are in range.** If your request arrived directly, the reply goes
+out zero-hop: a single packet that no repeater will ever retransmit. It costs the mesh one
+transmission and nothing more. This is the common case, and it is free.
+
+**A hop limit on what gets answered at all.** A request from several hops away can only be
+answered by flooding, and *every* repeater that heard it floods its own reply — so one `test`
+becomes one flood packet per repeater, each propagating as far as `flood.max` allows.
+`set autoreply.hops` bounds this, and it is the setting that matters. `0` answers only direct
+neighbours and can never cause a flood at all.
+
+**A per-sender cooldown.** One reply per sender per five minutes, with the last 32 senders
+remembered. Someone hammering `test` gets one answer and then silence, and — because the
+per-sender check runs *before* the shared limit — their retries cannot use up anyone else's
+share. A group standing in a field testing together all get answers.
+
+**A global rate limit.** Ten replies per repeater per five minutes, whatever the source.
+Whatever else happens, that is the ceiling on what one repeater will put on the air.
+
+**Random stagger.** Replies are delayed by a random interval, so neighbouring repeaters
+answering the same message do not transmit on top of each other and corrupt each other's
+packets.
+
+If several of your repeaters cover the same area, consider enabling this on only one of them.
+
+📖 Full reference, the multi-hop region-scope details and the test procedure:
+**[docs/autoreply.md](./docs/autoreply.md)**
 
 ---
 

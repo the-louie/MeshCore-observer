@@ -19,13 +19,17 @@ the requester's name in brackets so several arriving together can be told apart.
 
 ## Setup
 
+The channel is not something you choose. It is always `#test-<iata>`, built from the region
+code the node already publishes under, so **the node must have one set**:
+
 ```
-set autoreply.channel #test-STO
-set autoreply.hops 8
+set mqtt.iata STO
+set autoreply on
 ```
 
-Then add the `#test-STO` channel in your client and send `test` to it. Every repeater in
-direct range answers. Nothing else is needed for a range check.
+`get autoreply.channel` then reports `#test-sto`. Add that channel in your client and send
+`test` to it. Every repeater in direct range answers. Nothing else is needed for a range
+check.
 
 To also get answers from repeaters **more than one hop away**, the request has to carry a
 region scope — see [How far the reply travels](#how-far-the-reply-travels) below.
@@ -33,40 +37,44 @@ region scope — see [How far the reply travels](#how-far-the-reply-travels) bel
 To turn it back off:
 
 ```
-set autoreply.channel
+set autoreply off
 ```
+
+A node with no region code set — no `mqtt.iata`, or the `XXX` placeholder — has no channel
+to listen on and stays silent even with `set autoreply on`. `get autoreply` says so.
 
 ## Commands
 
-#### Set the channel the repeater listens on
+#### Switch it on or off
+
+- `get autoreply`
+- `set autoreply on|off`
+
+**Default:** `off`
+
+#### Read the channel the repeater listens on
 
 - `get autoreply.channel`
-- `set autoreply.channel <#name>`
 
-**Parameters:**
-
-- `#name`: a hashtag channel name, up to 31 characters, starting with `#`. An empty value
-  disables the feature.
-
-**Default:** empty (disabled)
+**Read-only.** The channel is always `#test-` plus the node's `mqtt.iata` code, folded to
+lower case; change it with `set mqtt.iata`. Deriving it rather than accepting a name is what
+keeps every repeater off the mesh-wide `#test`, where a reply from each of them would be
+spam — a three-character region code can never produce one of the shared channel names.
 
 **Note:** the channel key is derived from the name — the first 16 bytes of `sha256("#name")`
 — so there is no PSK to configure or share. Any client that adds a channel of the same name
 gets the same key.
 
-**Note:** the name is folded to **lower case** when you set it. The key is the hash of the
-name exactly as stored, and clients only accept lower-case channel names, so an upper-case
-name would produce a channel nobody could join. `set autoreply.channel #test-STO` therefore
-stores `#test-sto`, and the command echoes back what it saved — type that into your client.
+**Note:** the name is **lower case**. The key is the hash of the name exactly as stored, and
+clients only accept lower-case channel names, so an upper-case name would produce a channel
+nobody could join. `set mqtt.iata STO` therefore gives `#test-sto` — type that into your
+client.
 
 Region names are **not** folded, so if you pair the channel with a region for the multi-hop
 path, spell the region exactly the same on every node.
 
 The trigger keyword is case-insensitive: `test`, `Test` and `TEST` all work. Many phone
 keyboards capitalise the first letter, so this matters in practice.
-
-**Note:** `#public`, `#test` and `#bot` are rejected. They are shared mesh-wide, so a reply
-from every repeater on them is spam. Use a regional name, such as your IATA code.
 
 #### Limit how far away a request can be
 
@@ -88,7 +96,7 @@ from every repeater on them is spam. Use a regional name, such as your IATA code
 
 A channel name does not limit propagation. Repeaters forward on the packet header alone —
 route type, hop count against `flood.max`, transport code — and the channel lives in the
-encrypted payload, which a repeater does not read. A message to `#test-STO` therefore costs
+encrypted payload, which a repeater does not read. A message to `#test-sto` therefore costs
 exactly the same airtime, over exactly the same hops, as one to `#test`. Naming the channel
 per region keeps it out of other people's message lists; it does not keep it off their air.
 
@@ -121,11 +129,11 @@ in the companion firmware), so unscoped is what most meshes actually carry.
 To use the cheaper scoped path, pair the channel with a region of the same name:
 
 ```
-region def #test-STO
-region allowf #test-STO
+region def #test-sto
+region allowf #test-sto
 ```
 
-Region keys are derived from the name in the same way, so `#test-STO` needs no key
+Region keys are derived from the name in the same way, so `#test-sto` needs no key
 distribution either. See [CLI commands](cli_commands.md) for the full `region` syntax.
 
 ## Possible improvement: reply direct along the reverse path

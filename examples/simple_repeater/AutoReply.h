@@ -1,7 +1,8 @@
 #pragma once
 
-#include <Arduino.h>   // needed for PlatformIO
+#include <Arduino.h>
 #include <Mesh.h>
+#include <helpers/AutoReplyLogic.h>
 #include <helpers/IdentityStore.h>
 #include "RateLimiter.h"
 
@@ -23,37 +24,35 @@
 #define AUTOREPLY_MAX_SENDERS 32
 
 /**
- * \brief  Replies to a keyword on one hashtag channel, with a signal + path report.
+ * \brief  Replies to a keyword on the node's regional test channel, with a signal
+ *         + path report.
  *
- * The channel key is derived from the channel name (first 16 bytes of sha256 of the
- * name), so no PSK needs to be configured or shared. Disabled while the channel name
- * is empty.
+ * The channel is '#test-<iata>', derived from the region code set with
+ * 'set mqtt.iata' rather than configured here, and its key is the first 16 bytes of
+ * sha256 of that name - so there is no PSK to configure or share, and any client
+ * that adds a channel of the same name can use it. Switched on with
+ * 'set autoreply on'; a node with no region set stays silent either way.
  *
- * Every repeater in range answers the same trigger, so replies are only ever sent for
- * region-scoped requests (checked by the caller), are rate limited, and are staggered
- * by a random delay.
+ * Every repeater in range answers the same trigger, so requests from further away than
+ * 'autoreply.hops' are ignored, replies are rate limited per sender and in total, and
+ * are staggered by a random delay.
  */
 class AutoReply {
   FILESYSTEM* _fs;
+  bool _enabled;
+  char _iata[8];                // region the channel below was derived from
   char _channel_name[32];
   uint8_t _hops;                // max hop count of a request we will answer
   bool _ready;
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
 
-  // ring of recently answered senders, so one person retrying cannot use up
-  // everyone else's share of the global limit
-  struct SenderEntry {
-    uint32_t id;          // hash of the sender name, 0 = unused slot
-    uint32_t last_reply;
-  };
-  SenderEntry _senders[AUTOREPLY_MAX_SENDERS];
+  AutoReplySender _senders[AUTOREPLY_MAX_SENDERS];
   uint8_t _next_sender;
 
-  void deriveChannel();
+  void refreshChannel(const char* iata);
   void load();
   void save();
-  bool senderAllowed(const char* name, size_t name_len, uint32_t now);
 
 public:
   AutoReply();
@@ -61,15 +60,18 @@ public:
   void begin(FILESYSTEM* fs);
 
   /**
-   * \brief  Handle the 'set/get autoreply.*' commands.
+   * \brief  Handle the 'set/get autoreply[.*]' commands.
+   * \param  iata  the node's region code, or NULL when the build has none
    * \returns  true if the command was ours (and 'reply' was filled in)
    */
-  bool handleCommand(const char* command, char* reply);
+  bool handleCommand(const char* iata, const char* command, char* reply);
 
   /**
    * \brief  Match our channel, for Mesh::searchChannelsByHash()
+   * \param  iata  the node's region code, re-derives the channel when it changes
    */
-  int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches);
+  int searchChannelsByHash(const char* iata, const uint8_t* hash, mesh::GroupChannel channels[],
+                           int max_matches);
 
   /**
    * \brief  Test an incoming group text for the trigger, and build the reply payload.
