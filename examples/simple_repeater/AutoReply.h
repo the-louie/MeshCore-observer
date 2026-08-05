@@ -14,14 +14,17 @@
 #define AUTOREPLY_MAX_TEXT    112
 // the requester's name is echoed back so they can pick their reply out of several
 #define AUTOREPLY_MAX_SENDER  16
+// '#test-' plus a three-character region code, rebuilt on the stack when needed
+#define AUTOREPLY_MAX_CHANNEL 16
 #define AUTOREPLY_MAX_PAYLOAD (5 + AUTOREPLY_MAX_TEXT)   // timestamp + flags + text
 
 // how many replies this repeater will send in total, per AUTOREPLY_WINDOW_SECS
 #define AUTOREPLY_MAX_REPLIES 10
 // how long one sender must wait before being answered again
 #define AUTOREPLY_WINDOW_SECS 300
-// senders remembered for the per-sender cooldown (oldest is evicted)
-#define AUTOREPLY_MAX_SENDERS 32
+// senders remembered for the per-sender cooldown (oldest is evicted). Sized above
+// AUTOREPLY_MAX_REPLIES so a sender can never be evicted while still cooling down.
+#define AUTOREPLY_MAX_SENDERS 16
 
 /**
  * \brief  Replies to a keyword on the node's regional test channel, with a signal
@@ -40,8 +43,7 @@
 class AutoReply {
   FILESYSTEM* _fs;
   bool _enabled;
-  char _iata[8];                // region the channel below was derived from
-  char _channel_name[32];
+  char _iata[8];                // region the channel was derived from
   uint8_t _hops;                // max hop count of a request we will answer
   bool _ready;
   mesh::GroupChannel _channel;

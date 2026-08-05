@@ -6,8 +6,8 @@
 #include <string>
 #include "helpers/AutoReplyLogic.h"
 
-// The firmware's buffer for a channel name (AutoReply::_channel_name).
-static const size_t CHANNEL_BUF = 32;
+// The firmware's buffer for a channel name (AUTOREPLY_MAX_CHANNEL).
+static const size_t CHANNEL_BUF = 16;
 
 // autoReplyParseRequest() trims in place, so tests need a mutable copy.
 static void copyText(char* dest, size_t size, const char* src) {
@@ -280,17 +280,17 @@ TEST(SenderAllowed, WithoutARingEverythingIsAllowed) {
 }
 
 TEST(SenderAllowed, MirrorsTheFirmwareSettings) {
-  // AUTOREPLY_MAX_SENDERS = 32, AUTOREPLY_WINDOW_SECS = 300.
-  AutoReplySender ring[32] = {};
+  // AUTOREPLY_MAX_SENDERS = 16, AUTOREPLY_WINDOW_SECS = 300.
+  AutoReplySender ring[16] = {};
   uint8_t next = 0;
-  for (uint32_t id = 1; id <= 32; id++) {
-    EXPECT_TRUE(autoReplySenderAllowed(ring, 32, next, id, 1000, 300));
+  for (uint32_t id = 1; id <= 16; id++) {
+    EXPECT_TRUE(autoReplySenderAllowed(ring, 16, next, id, 1000, 300));
   }
-  for (uint32_t id = 1; id <= 32; id++) {
-    EXPECT_FALSE(autoReplySenderAllowed(ring, 32, next, id, 1299, 300));
+  for (uint32_t id = 1; id <= 16; id++) {
+    EXPECT_FALSE(autoReplySenderAllowed(ring, 16, next, id, 1299, 300));
   }
-  for (uint32_t id = 1; id <= 32; id++) {
-    EXPECT_TRUE(autoReplySenderAllowed(ring, 32, next, id, 1300, 300));
+  for (uint32_t id = 1; id <= 16; id++) {
+    EXPECT_TRUE(autoReplySenderAllowed(ring, 16, next, id, 1300, 300));
   }
 }
 

@@ -32,7 +32,6 @@ AutoReply::AutoReply()
     _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _iata[0] = 0;
-  _channel_name[0] = 0;
   memset(_senders, 0, sizeof(_senders));
   _next_sender = 0;
 }
@@ -44,24 +43,27 @@ void AutoReply::begin(FILESYSTEM* fs) {
 
 // The region is owned by the observer config and can change at any time, so the
 // channel is re-derived whenever it has. The hashtag channel key is the first 16
-// bytes of sha256 of the name.
+// bytes of sha256 of the name. Only the key and its hash are kept: the name is a
+// pure function of the region, so the few messages that print it rebuild it.
 void AutoReply::refreshChannel(const char* iata) {
   if (iata == NULL) iata = "";
   if (strcmp(iata, _iata) == 0) return;
 
   StrHelper::strncpy(_iata, iata, sizeof(_iata));
-  _ready = autoReplyDeriveChannel(_iata, _channel_name, sizeof(_channel_name));
+
+  char name[AUTOREPLY_MAX_CHANNEL];
+  _ready = autoReplyDeriveChannel(_iata, name, sizeof(name));
   if (!_ready) {
     MESH_DEBUG_PRINTLN("AutoReply: no region set, staying silent - use 'set mqtt.iata'");
     return;
   }
 
   memset(_channel.secret, 0, sizeof(_channel.secret));
-  mesh::Utils::sha256(_channel.secret, 16, (const uint8_t *) _channel_name, strlen(_channel_name));
+  mesh::Utils::sha256(_channel.secret, 16, (const uint8_t *) name, strlen(name));
   mesh::Utils::sha256(_channel.hash, sizeof(_channel.hash), _channel.secret, 16);
 
   MESH_DEBUG_PRINTLN("AutoReply: channel '%s' (hash %02X), keyword '%s', max %d hops, %s",
-                     _channel_name, (uint32_t)_channel.hash[0], AUTOREPLY_KEYWORD,
+                     name, (uint32_t)_channel.hash[0], AUTOREPLY_KEYWORD,
                      (uint32_t)_hops, _enabled ? "on" : "off");
 }
 
@@ -107,20 +109,21 @@ int AutoReply::searchChannelsByHash(const char* iata, const uint8_t* hash,
   refreshChannel(iata);
   if (!_enabled || !_ready) return 0;
   if (memcmp(hash, _channel.hash, sizeof(_channel.hash)) != 0) {
-    // the name is hashed exactly as stored, so a mismatch is usually a spelling one
-    MESH_DEBUG_PRINTLN("AutoReply: not our channel - heard hash %02X, '%s' is %02X",
-                       (uint32_t)hash[0], _channel_name, (uint32_t)_channel.hash[0]);
+    MESH_DEBUG_PRINTLN("AutoReply: not our channel - heard hash %02X, ours is %02X",
+                       (uint32_t)hash[0], (uint32_t)_channel.hash[0]);
     return 0;
   }
 
-  MESH_DEBUG_PRINTLN("AutoReply: channel '%s' matched (hash %02X)", _channel_name,
-                     (uint32_t)_channel.hash[0]);
+  MESH_DEBUG_PRINTLN("AutoReply: channel matched (hash %02X)", (uint32_t)_channel.hash[0]);
   channels[0] = _channel;
   return 1;
 }
 
 bool AutoReply::handleCommand(const char* iata, const char* command, char* reply) {
   refreshChannel(iata);
+
+  char name[AUTOREPLY_MAX_CHANNEL];
+  autoReplyDeriveChannel(_iata, name, sizeof(name));
 
   if (memcmp(command, "set autoreply ", 14) == 0) {
     if (memcmp(&command[14], "on", 2) == 0) {
@@ -135,7 +138,7 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     if (_enabled && !_ready) {
       strcpy(reply, "OK - on, but no region yet: set mqtt.iata");
     } else {
-      sprintf(reply, "OK - %s", _enabled ? _channel_name : "off");
+      sprintf(reply, "OK - %s", _enabled ? name : "off");
     }
     return true;
   }
@@ -158,7 +161,7 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
   }
 
   if (strcmp(command, "get autoreply.channel") == 0) {
-    sprintf(reply, "> %s", _ready ? _channel_name : "(no region - set mqtt.iata)");
+    sprintf(reply, "> %s", _ready ? name : "(no region - set mqtt.iata)");
     return true;
   }
 
@@ -171,7 +174,7 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     if (!_ready) {
       sprintf(reply, "> %s, no region - set mqtt.iata", _enabled ? "on" : "off");
     } else {
-      sprintf(reply, "> %s %s '%s' max %d hops", _enabled ? "on" : "off", _channel_name,
+      sprintf(reply, "> %s %s '%s' max %d hops", _enabled ? "on" : "off", name,
               AUTOREPLY_KEYWORD, _hops);
     }
     return true;

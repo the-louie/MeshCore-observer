@@ -111,7 +111,7 @@ becomes one flood packet per repeater, each propagating as far as `flood.max` al
 `set autoreply.hops` bounds this, and it is the setting that matters. `0` answers only direct
 neighbours and can never cause a flood at all.
 
-**A per-sender cooldown.** One reply per sender per five minutes, with the last 32 senders
+**A per-sender cooldown.** One reply per sender per five minutes, with the last 16 senders
 remembered. Someone hammering `test` gets one answer and then silence, and — because the
 per-sender check runs *before* the shared limit — their retries cannot use up anyone else's
 share. A group standing in a field testing together all get answers.

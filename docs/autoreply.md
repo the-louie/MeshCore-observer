@@ -174,8 +174,8 @@ Be honest with yourself about the traffic before enabling this:
 - One trigger produces **up to one flood reply per repeater in range**, each propagating
   across the configured scope.
 - Two rate limits apply, both per repeater:
-  - **Per sender** — one reply per sender per 5 minutes. The last 32 senders are remembered
-    in a ring; the oldest is forgotten when a 33rd appears. Senders are identified by the
+  - **Per sender** — one reply per sender per 5 minutes. The last 16 senders are remembered
+    in a ring; the oldest is forgotten when a 17th appears. Senders are identified by the
     name prefix a group message carries, folded to lower case, so this is a courtesy limit
     rather than a security control — a name is trivially spoofed, and two people using the
     same name share a slot.
