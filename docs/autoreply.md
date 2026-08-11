@@ -88,6 +88,25 @@ keyboards capitalise the first letter, so this matters in practice.
 
 **Default:** `8`
 
+#### Choose how a direct request is answered
+
+- `get autoreply.direct.flood`
+- `set autoreply.direct.flood on|off`
+
+**Default:** `on`
+
+With `on`, a request that reached this repeater without passing through another one is
+answered the same way any other request is: a flood, kept inside the request's region scope
+when it had one. With `off` it is answered by a single zero-hop packet that no repeater will
+ever relay — the cheapest possible reply, and the behaviour of releases before this setting
+existed.
+
+Prefer `on` unless airtime is tight. A repeater generally sits in much quieter RF than a
+handheld, so it hears requests that its own answers cannot get back to — the link is
+asymmetric even when the antennas are not, and a zero-hop reply has no second chance and no
+alternative path. `off` is the right choice on dense urban sites, or where requesters are
+known to be in solid two-way range.
+
 #### Show the current state
 
 - `get autoreply`
@@ -105,9 +124,18 @@ two ways, and stays silent if it can do neither:
 
 | Request arrived | Reply |
 |---|---|
-| **0 hops** (you are in direct range) | Sent zero-hop. One packet, and no repeater will ever retransmit it. Costs the mesh nothing. |
+| **0 hops**, `autoreply.direct.flood on` (default) | Flooded, scoped as below. Reaches you even where you cannot hear this repeater directly. |
+| **0 hops**, `autoreply.direct.flood off` | Sent zero-hop. One packet, and no repeater will ever retransmit it. Costs the mesh nothing. |
 | **1+ hops, region-scoped** | Flooded back inside that same scope only. |
 | **1+ hops, unscoped** | Flooded. **This is the expensive case** — see below. |
+
+**Why a direct request is flooded by default.** Hearing you is no promise you can hear the
+answer. A repeater usually sits in far quieter RF than a handheld does, so it decodes
+signals that never make it back the other way — the link is asymmetric even though the
+antennas are not. A zero-hop reply gets exactly one transmission and no second chance, so
+where that asymmetry exists the requester sees silence. Flooding lets a repeater you *can*
+hear carry the answer back. Turn it off on dense sites where the extra packet is not worth
+it, or where most requesters are known to be in solid two-way range.
 
 **Understand the multi-hop cost before raising `autoreply.hops`.** A request that arrives
 from several hops away can only be answered by flooding, and *every* repeater that heard it
@@ -116,8 +144,10 @@ propagating as far as `flood.max` allows. On a busy mesh that is real airtime.
 
 What bounds it:
 
-* `autoreply.hops` — the single most effective control. `0` answers only direct neighbours
-  and can never flood at all. A small value such as `2` or `3` keeps replies regional.
+* `autoreply.hops` — the single most effective control. `0` answers only direct neighbours.
+  A small value such as `2` or `3` keeps replies regional.
+* `autoreply.direct.flood off` — the only setting that produces no flood whatsoever, and
+  only in combination with `autoreply.hops 0`. Either one alone still floods.
 * The rate limits (below).
 * Each repeater's own `flood.max` / `flood.max.unscoped`.
 

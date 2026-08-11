@@ -44,7 +44,7 @@ That is it. Check it took:
 
 ```
 get autoreply
-> on #test-sto 'test' max 8 hops
+> on #test-sto 'test' max 8 hops, direct flood
 ```
 
 Now add the channel it named — `#test-sto` above — in your MeshCore client, send `test` to
@@ -62,9 +62,11 @@ To turn it off again: `set autoreply off`.
 |---|---|---|
 | `set autoreply on\|off` | `off` | Whether this repeater answers the trigger. |
 | `set autoreply.hops <0-63>` | `8` | How many hops away a request may be and still get an answer. `0` = direct neighbours only. |
+| `set autoreply.direct.flood on\|off` | `on` | Whether a request that arrived direct is answered with a flood. `off` sends a single zero-hop packet that no repeater relays — cheapest, but it never reaches anyone who cannot hear this repeater directly. |
 | `get autoreply` | — | Current state, in one line. |
 | `get autoreply.channel` | — | The channel name. **Read-only** — it follows `set mqtt.iata`. |
 | `get autoreply.hops` | — | Read the hop limit back. |
+| `get autoreply.direct.flood` | — | Read the direct-reply mode back. |
 
 The trigger word is `test`, case-insensitive — `test`, `Test` and `TEST` all work, which
 matters because phone keyboards like to capitalise the first letter. Override it at build
@@ -101,15 +103,23 @@ nobody could join.
 Every repeater in range answers the same message, which is exactly the shape of a broadcast
 storm. Five mitigations keep it cheap:
 
-**Zero-hop replies when you are in range.** If your request arrived directly, the reply goes
-out zero-hop: a single packet that no repeater will ever retransmit. It costs the mesh one
-transmission and nothing more. This is the common case, and it is free.
+**A direct reply you can make free.** If your request arrived directly, the repeater can
+answer zero-hop: a single packet that no repeater will ever retransmit, costing the mesh one
+transmission and nothing more. That is `set autoreply.direct.flood off`.
+
+It is not the default, because hearing you is no promise you can hear the answer. A repeater
+usually sits in far quieter radio noise than a handheld does, so it decodes signals that
+never make it back the other way — the link is asymmetric even when the antennas are not. A
+zero-hop reply gets one transmission, no acknowledgement and no alternative path, so where
+that gap exists you simply see silence. Flooding lets a repeater you *can* hear carry the
+answer back. Turn it off where airtime is tight, or where the people testing are known to be
+in solid two-way range.
 
 **A hop limit on what gets answered at all.** A request from several hops away can only be
 answered by flooding, and *every* repeater that heard it floods its own reply — so one `test`
 becomes one flood packet per repeater, each propagating as far as `flood.max` allows.
 `set autoreply.hops` bounds this, and it is the setting that matters. `0` answers only direct
-neighbours and can never cause a flood at all.
+neighbours, and paired with `autoreply.direct.flood off` it puts no flood on the mesh at all.
 
 **A per-sender cooldown.** One reply per sender per five minutes, with the last 16 senders
 remembered. Someone hammering `test` gets one answer and then silence, and — because the

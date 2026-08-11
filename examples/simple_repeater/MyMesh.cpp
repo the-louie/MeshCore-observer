@@ -978,10 +978,11 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
                              uint8_t* data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_TXT) return;
 
-  // A zero-hop request is answered zero-hop: one packet, which no repeater will
-  // retransmit. Further away we have to flood, kept inside the scope of the request
-  // when it had one. 'autoreply.hops' is what bounds how far that reaches.
-  bool zero_hop = (packet->getPathHashCount() == 0);
+  // Anything we flood is kept inside the scope of the request when it had one, and
+  // 'autoreply.hops' bounds how far away a request may be to get one at all. A request
+  // that arrived direct is the one case we can answer without flooding at all, which
+  // 'autoreply.direct.flood off' trades reach for.
+  bool zero_hop = autoReplyReplyIsZeroHop(packet->getPathHashCount(), auto_reply.directFlood());
 
   uint8_t temp[AUTOREPLY_MAX_PAYLOAD];
   int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,

@@ -45,6 +45,7 @@ class AutoReply {
   bool _enabled;
   char _iata[8];                // region the channel was derived from
   uint8_t _hops;                // max hop count of a request we will answer
+  bool _direct_flood;           // flood the answer to a request that arrived direct
   bool _ready;
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
@@ -67,6 +68,11 @@ public:
    * \returns  true if the command was ours (and 'reply' was filled in)
    */
   bool handleCommand(const char* iata, const char* command, char* reply);
+
+  /**
+   * \brief  Whether a request that arrived direct is answered with a flood.
+   */
+  bool directFlood() const { return _direct_flood; }
 
   /**
    * \brief  Match our channel, for Mesh::searchChannelsByHash()

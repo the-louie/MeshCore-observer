@@ -304,9 +304,70 @@ TEST(HopsAllowed, AcceptsUpToAndIncludingTheLimit) {
 }
 
 TEST(HopsAllowed, ZeroAnswersDirectNeighboursOnly) {
-  // The setting that can never cause a flood.
   EXPECT_TRUE(autoReplyHopsAllowed(0, 0));
   EXPECT_FALSE(autoReplyHopsAllowed(1, 0));
+}
+
+// ---- reading an on/off argument --------------------------------------------
+
+TEST(ParseOnOff, AcceptsBothValuesInAnyCase) {
+  bool v = false;
+  EXPECT_TRUE(autoReplyParseOnOff("on", &v));
+  EXPECT_TRUE(v);
+  EXPECT_TRUE(autoReplyParseOnOff("off", &v));
+  EXPECT_FALSE(v);
+  EXPECT_TRUE(autoReplyParseOnOff("ON", &v));
+  EXPECT_TRUE(v);
+  EXPECT_TRUE(autoReplyParseOnOff("Off", &v));
+  EXPECT_FALSE(v);
+}
+
+TEST(ParseOnOff, ToleratesWhitespaceATerminalMayAdd) {
+  bool v = false;
+  EXPECT_TRUE(autoReplyParseOnOff("on\r\n", &v));
+  EXPECT_TRUE(v);
+  EXPECT_TRUE(autoReplyParseOnOff("  off  ", &v));
+  EXPECT_FALSE(v);
+}
+
+TEST(ParseOnOff, RejectsAWordThatMerelyStartsWithTheValue) {
+  bool v = true;
+  EXPECT_FALSE(autoReplyParseOnOff("onions", &v));
+  EXPECT_FALSE(autoReplyParseOnOff("offset", &v));
+  EXPECT_TRUE(v);   // a rejected argument leaves the setting alone
+}
+
+TEST(ParseOnOff, RejectsEmptyAndDegenerateInput) {
+  bool v = true;
+  EXPECT_FALSE(autoReplyParseOnOff("", &v));
+  EXPECT_FALSE(autoReplyParseOnOff("   ", &v));
+  EXPECT_FALSE(autoReplyParseOnOff("o", &v));
+  EXPECT_FALSE(autoReplyParseOnOff(NULL, &v));
+  EXPECT_FALSE(autoReplyParseOnOff("on", NULL));
+  EXPECT_TRUE(v);
+}
+
+// ---- direct request: one packet, or one a repeater can carry back -----------
+
+TEST(ReplyIsZeroHop, DirectRequestOnlyWhenDirectFloodIsOff) {
+  EXPECT_TRUE(autoReplyReplyIsZeroHop(0, false));
+  EXPECT_FALSE(autoReplyReplyIsZeroHop(0, true));
+}
+
+TEST(ReplyIsZeroHop, AnythingThatTravelledIsAlwaysFlooded) {
+  // A reply can only skip the flood when the request needed no repeater to reach us.
+  for (uint8_t hops = 1; hops <= 63; hops++) {
+    EXPECT_FALSE(autoReplyReplyIsZeroHop(hops, false));
+    EXPECT_FALSE(autoReplyReplyIsZeroHop(hops, true));
+  }
+}
+
+TEST(ReplyIsZeroHop, SilenceOnTheMeshNeedsBothSettings) {
+  // 'autoreply.hops' bounds which requests are answered, not how they are answered,
+  // so only the pair of them keeps a reply off the mesh entirely.
+  EXPECT_TRUE(autoReplyHopsAllowed(0, 0));
+  EXPECT_FALSE(autoReplyReplyIsZeroHop(0, true));
+  EXPECT_TRUE(autoReplyReplyIsZeroHop(0, false));
 }
 
 int main(int argc, char** argv) {

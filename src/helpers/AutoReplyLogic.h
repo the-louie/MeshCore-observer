@@ -117,9 +117,40 @@ static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* key
   return req;
 }
 
+// Read an 'on' or 'off' argument, the form every boolean setting in this feature
+// takes. The token ends at the first space or line ending, so a value typed with
+// trailing whitespace still reads, while a word that merely starts with 'on' does
+// not. 'out' is left alone unless a whole valid token was found.
+static inline bool autoReplyParseOnOff(const char* arg, bool* out) {
+  if (arg == NULL || out == NULL) return false;
+
+  while (*arg == ' ') arg++;
+  size_t len = 0;
+  while (arg[len] && arg[len] != ' ' && arg[len] != '\r' && arg[len] != '\n') len++;
+
+  if (len == 2 && strncasecmp(arg, "on", 2) == 0) {
+    *out = true;
+    return true;
+  }
+  if (len == 3 && strncasecmp(arg, "off", 3) == 0) {
+    *out = false;
+    return true;
+  }
+  return false;
+}
+
 // A request from further away than 'max_hops' is ignored. Answering it means
 // flooding, and every repeater that heard it floods a reply of its own, so this is
 // the setting that bounds what one 'test' costs the mesh.
 static inline bool autoReplyHopsAllowed(uint8_t hop_count, uint8_t max_hops) {
   return hop_count <= max_hops;
+}
+
+// A request that arrived direct can be answered with a single packet no repeater
+// will retransmit, which costs the mesh nothing but reaches only what this node can
+// reach. Hearing a request is no promise the requester can hear the answer - it may
+// sit in far worse noise than a repeater does - so 'direct_flood' trades that packet
+// for a flooded one that a neighbouring repeater can carry back.
+static inline bool autoReplyReplyIsZeroHop(uint8_t hop_count, bool direct_flood) {
+  return hop_count == 0 && !direct_flood;
 }

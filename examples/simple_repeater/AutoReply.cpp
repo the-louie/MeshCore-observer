@@ -3,7 +3,8 @@
 #include <helpers/TxtDataHelpers.h>
 
 #define AUTOREPLY_CONFIG_FILE   "/autoreply"
-#define AUTOREPLY_CONFIG_VER    2
+#define AUTOREPLY_CONFIG_VER    3
+#define AUTOREPLY_CONFIG_VER_2  2    // enabled + hops, with no direct reply mode stored
 #define AUTOREPLY_CONFIG_VER_1  1    // channel name + hops, before the channel was derived
 
 #define MAX_PATH_HASHES_SHOWN   8    // keep the reply short, it is airtime
@@ -28,7 +29,7 @@ static File openWrite(FILESYSTEM* fs, const char* filename) {
 }
 
 AutoReply::AutoReply()
-  : _fs(NULL), _enabled(false), _hops(8), _ready(false),
+  : _fs(NULL), _enabled(false), _hops(8), _direct_flood(true), _ready(false),
     _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _iata[0] = 0;
@@ -75,6 +76,13 @@ void AutoReply::load() {
     uint8_t ver = 0;
     file.read(&ver, 1);
     if (ver == AUTOREPLY_CONFIG_VER) {
+      uint8_t enabled = 0, direct_flood = 1;
+      file.read(&enabled, 1);
+      file.read(&_hops, 1);
+      file.read(&direct_flood, 1);
+      _enabled = enabled != 0;
+      _direct_flood = direct_flood != 0;
+    } else if (ver == AUTOREPLY_CONFIG_VER_2) {
       uint8_t enabled = 0;
       file.read(&enabled, 1);
       file.read(&_hops, 1);
@@ -97,9 +105,11 @@ void AutoReply::save() {
   if (file) {
     uint8_t ver = AUTOREPLY_CONFIG_VER;
     uint8_t enabled = _enabled ? 1 : 0;
+    uint8_t direct_flood = _direct_flood ? 1 : 0;
     file.write(&ver, 1);
     file.write(&enabled, 1);
     file.write(&_hops, 1);
+    file.write(&direct_flood, 1);
     file.close();
   }
 }
@@ -126,11 +136,7 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
   autoReplyDeriveChannel(_iata, name, sizeof(name));
 
   if (memcmp(command, "set autoreply ", 14) == 0) {
-    if (memcmp(&command[14], "on", 2) == 0) {
-      _enabled = true;
-    } else if (memcmp(&command[14], "off", 3) == 0) {
-      _enabled = false;
-    } else {
+    if (!autoReplyParseOnOff(&command[14], &_enabled)) {
       strcpy(reply, "Err - use: set autoreply on|off");
       return true;
     }
@@ -160,6 +166,21 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     return true;
   }
 
+  if (memcmp(command, "set autoreply.direct.flood ", 27) == 0) {
+    if (!autoReplyParseOnOff(&command[27], &_direct_flood)) {
+      strcpy(reply, "Err - use: set autoreply.direct.flood on|off");
+      return true;
+    }
+    save();
+    strcpy(reply, "OK");
+    return true;
+  }
+
+  if (strcmp(command, "get autoreply.direct.flood") == 0) {
+    sprintf(reply, "> %s", _direct_flood ? "on" : "off");
+    return true;
+  }
+
   if (strcmp(command, "get autoreply.channel") == 0) {
     sprintf(reply, "> %s", _ready ? name : "(no region - set mqtt.iata)");
     return true;
@@ -174,8 +195,8 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     if (!_ready) {
       sprintf(reply, "> %s, no region - set mqtt.iata", _enabled ? "on" : "off");
     } else {
-      sprintf(reply, "> %s %s '%s' max %d hops", _enabled ? "on" : "off", name,
-              AUTOREPLY_KEYWORD, _hops);
+      sprintf(reply, "> %s %s '%s' max %d hops, direct %s", _enabled ? "on" : "off", name,
+              AUTOREPLY_KEYWORD, _hops, _direct_flood ? "flood" : "zero-hop");
     }
     return true;
   }
