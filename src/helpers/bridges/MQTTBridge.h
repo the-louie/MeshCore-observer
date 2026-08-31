@@ -693,6 +693,28 @@ public:
 #ifdef WITH_SNMP
   void setSNMPAgent(MeshSNMPAgent* agent) { _snmp_agent = agent; }
 #endif
+
+  // Downlink. The bridge holds no handle on the mesh or the CLI, so a subscriber
+  // that wants to act on a message registers one of these instead. The callback
+  // runs on the client's esp-mqtt event task, which has a fraction of the stack
+  // this task has: implementations must copy and return, never verify or execute.
+  struct ControlSink {
+    virtual ~ControlSink() { }
+    virtual void onControlMessage(const char* topic, const uint8_t* payload, size_t len) = 0;
+  };
+
+  // 'topics' are subscribed on every connect, so they survive the reconnect
+  // ladder. Both pointers are owned by the caller and must outlive the bridge.
+  void setControlSink(ControlSink* sink, const char* const* topics, size_t topic_count) {
+    _control_sink = sink;
+    _control_topics = topics;
+    _control_topic_count = topic_count;
+  }
+
+private:
+  ControlSink* _control_sink = NULL;
+  const char* const* _control_topics = NULL;
+  size_t _control_topic_count = 0;
 };
 
 #endif

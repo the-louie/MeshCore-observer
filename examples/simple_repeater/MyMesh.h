@@ -48,6 +48,7 @@
 #include <helpers/RegionMap.h>
 #include "RateLimiter.h"
 #include "AutoReply.h"
+#include "MqttControl.h"
 
 
 struct RepeaterStats {
@@ -95,6 +96,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks
 #ifdef WITH_WEBCONFIG
     , public WebConfigServer::Callbacks
 #endif
+#ifdef WITH_MQTT_BRIDGE
+    , public MqttCommandRunner, public MQTTBridge::ControlSink
+#endif
 {
   FILESYSTEM* _fs;
   uint32_t last_millis;
@@ -114,6 +118,24 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks
   TransportKey default_scope;
   RateLimiter discover_limiter, anon_limiter;
   AutoReply auto_reply;
+#ifdef WITH_MQTT_BRIDGE
+  MqttControl mqtt_control;
+  // Owned here so the bridge's subscription list outlives every reconnect.
+  char _ctrl_topic[MQTTCTRL_MAX_TOPIC + 1];
+  char _ctrl_broadcast[MQTTCTRL_MAX_TOPIC + 1];
+  char _ctrl_result[MQTTCTRL_MAX_TOPIC + 1];
+  const char* _ctrl_topics[2];
+  void setupMqttControl(MQTTBridge* bridge);
+  void loopMqttControl();
+public:
+  void onControlMessage(const char* topic, const uint8_t* payload, size_t len) override {
+    mqtt_control.stage(topic, payload, len);
+  }
+  void runCommand(uint32_t sender_timestamp, char* command, char* reply) override {
+    handleCommand(sender_timestamp, command, reply);
+  }
+private:
+#endif
   uint32_t pending_discover_tag;
   unsigned long pending_discover_until;
   bool region_load_active;

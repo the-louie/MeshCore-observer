@@ -1189,6 +1189,9 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   acl.load(_fs, self_id);
   auto_reply.begin(_fs);
+#ifdef WITH_MQTT_BRIDGE
+  mqtt_control.begin(_fs);
+#endif
   // TODO: key_store.begin();
   region_map.load(_fs);
 
@@ -1245,6 +1248,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
         bridge->setSNMPAgent(&_snmp_agent);
       }
 #endif
+      setupMqttControl(bridge);
 #endif
 
       bridge->begin();
@@ -1735,12 +1739,57 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (memcmp(command, "discover.scopes", 15) == 0) {
     strcpy(reply, "Err - neighbors not enabled in this build");
 #endif
+#ifdef WITH_MQTT_BRIDGE
+  } else if (mqtt_control.handleCommand(command, reply)) {
+    // reply already filled in
+#endif
   } else if (auto_reply.handleCommand(autoReplyRegion(), command, reply)) {
     // reply already filled in
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
+
+#ifdef WITH_MQTT_BRIDGE
+
+// Build this node's control topics once and hand the bridge a list it can
+// re-subscribe from on every reconnect. Nothing is allocated per message or per
+// reconnect: docs/mbedtls-tls-footprint.md records a measured largest-free-block
+// ratchet on this exact path, so the buffers are members and stay that way.
+void MyMesh::setupMqttControl(MQTTBridge* bridge) {
+  const char* iata = autoReplyRegion();
+  if (iata == NULL || iata[0] == 0) return;      // no region, no control plane
+
+  char node_hex[MAX_ADVERT_DATA_SIZE];
+  mesh::Utils::toHex(node_hex, self_id.pub_key, 4);   // first four bytes name the node
+
+  if (!MqttControl::buildTopic(iata, node_hex, _ctrl_topic, sizeof(_ctrl_topic))) return;
+  if (!MqttControl::buildBroadcastTopic(iata, _ctrl_broadcast, sizeof(_ctrl_broadcast))) return;
+  MqttControl::buildResultTopic(iata, node_hex, _ctrl_result, sizeof(_ctrl_result));
+
+  _ctrl_topics[0] = _ctrl_topic;
+  _ctrl_topics[1] = _ctrl_broadcast;
+  bridge->setControlSink(this, _ctrl_topics, 2);
+}
+
+// Drained on the loop task, never on the MQTT event task: verification wants more
+// stack than that task has, and executing a command runs a flash write that would
+// stall the network stack's own thread.
+void MyMesh::loopMqttControl() {
+  if (!mqtt_control.hasPending()) return;
+
+  mesh::Identity owner;
+  const char* owner_hex = _cli.getObserverPrefs()->mqtt_owner_public_key;
+  if (owner_hex == NULL || owner_hex[0] == 0) return;    // inert without a key
+  if (!mesh::Utils::fromHex(owner.pub_key, PUB_KEY_SIZE, owner_hex)) return;
+
+  char reply[160];
+  MqttCtrlResult result = mqtt_control.drain(owner, getRTCClock()->getCurrentTime(),
+                                             this, reply, sizeof(reply));
+  MESH_DEBUG_PRINTLN("MqttControl: result %d, reply '%s'", (uint32_t)result, reply);
+}
+
+#endif
 
 void MyMesh::loop() {
   // Check radio FIRST to ensure we don't miss incoming packets
@@ -1749,6 +1798,10 @@ void MyMesh::loop() {
 
 #ifdef WITH_BRIDGE
   // bridge.loop() is now handled by FreeRTOS task on Core 0 - no need to call it here
+#endif
+
+#ifdef WITH_MQTT_BRIDGE
+  loopMqttControl();
 #endif
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {

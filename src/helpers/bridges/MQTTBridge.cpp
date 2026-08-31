@@ -1605,6 +1605,26 @@ bool MQTTBridge::ensureSlotClient(int index) {
   }
   slot.client->setAutoReconnect(false);  // we handle reconnect with our own backoff
 
+  // Registered before onConnect so the very first CONNACK already has somewhere to
+  // deliver. onTopic() both registers the handler and subscribes, and
+  // PsychicMqttClient re-subscribes everything on each reconnect, so a broker
+  // outage costs nothing here.
+  if (_control_sink != NULL) {
+    for (size_t i = 0; i < _control_topic_count; i++) {
+      const char* topic = _control_topics[i];
+      slot.client->onTopic(topic, 1, [this, topic](char* /*t*/, char* payload,
+                                                   int retain, int /*qos*/, bool /*dup*/) {
+        // A retained control message is one the broker replayed on connect, not
+        // one anybody just sent; acting on it would re-run whatever was last
+        // published every time the link flaps.
+        if (retain) return;
+        if (_control_sink != NULL && payload != NULL) {
+          _control_sink->onControlMessage(topic, (const uint8_t *) payload, strlen(payload));
+        }
+      });
+    }
+  }
+
   slot.client->onConnect([this, index](bool sessionPresent) {
     MQTT_DEBUG_PRINTLN("MQTT%d connected", index + 1);
     _slots[index].connected = true;
