@@ -76,6 +76,15 @@ path, spell the region exactly the same on every node.
 The trigger keyword is case-insensitive: `test`, `Test` and `TEST` all work. Many phone
 keyboards capitalise the first letter, so this matters in practice.
 
+The keyword may be followed by a correlation id: one space, then exactly eight hexadecimal
+characters, as in `test a1b2c3d4`. The id is echoed back in the reply, so a requester can tie
+an answer to the request that provoked it — which arrival time can no longer do once replies
+are delayed by minutes. Anything else after the keyword is ordinary chat and is ignored, so
+`test me` and `test 123` still cost nobody any airtime.
+
+A bare `test` keeps working and will continue to. Fleets are flashed slowly, and a firmware
+that answered only the id form would drop every not-yet-updated node out of a survey.
+
 #### Limit how far away a request can be
 
 - `get autoreply.hops`
@@ -87,6 +96,47 @@ keyboards capitalise the first letter, so this matters in practice.
   direct neighbours.
 
 **Default:** `8`
+
+#### Spread the replies out
+
+- `get autoreply.delay`
+- `set autoreply.delay <value>`
+
+**Parameters:**
+
+- `value`: multiplier (1-120) on the radio's own retransmit delay. The reply is sent after a
+  random wait between zero and that multiple.
+
+**Default:** `4`
+
+Every repeater in range answers the same request, so their replies compete for the air. Field
+measurement on 2026-08-30 found that a reply overlapping another transmission reached a median
+of 2 relays, against 5 for one sent into clear air, and that 16 of 18 requests drawing two or
+more replies contained an overlapping pair.
+
+Raise this where several repeaters cover the same ground. For an automated survey, where
+nobody is waiting for the answer, a much larger value costs only patience. The right number
+depends on how many repeaters hear each other and cannot be read off one mesh, which is why it
+is settable at runtime rather than compiled in.
+
+#### Bound how far a reply travels
+
+- `get autoreply.region`
+- `set autoreply.region <name>`
+
+**Parameters:**
+
+- `name`: a region from the node's own region table, or empty to clear.
+
+**Default:** empty — the reply mirrors whatever scope the request arrived under.
+
+With a region set, every reply is scoped to it regardless of how the request arrived. This
+bounds the airtime a survey costs the wider mesh while still letting a reply cross the whole
+region being measured.
+
+Note this bounds propagation by a *stated* boundary rather than by hop count. A hop cap would
+answer a different question — how much comes back to whoever asked — and would quietly hide
+the far side of the mesh, which is the thing a connectivity survey exists to see.
 
 #### Choose how a direct request is answered
 

@@ -81,22 +81,67 @@ static inline bool autoReplySenderAllowed(AutoReplySender* senders, uint8_t coun
   return true;
 }
 
-// A group text, split into who sent it and whether it asked for a reply. 'sender'
-// and 'message' point into the text buffer passed to autoReplyParseRequest().
+// A correlation id is exactly this many hex characters. Fixed rather than ranged
+// so the reply budget can be reasoned about, and so a half-typed id is a
+// non-trigger rather than a shorter id.
+#define AUTOREPLY_ID_LEN  8
+
+// A group text, split into who sent it and whether it asked for a reply. 'sender',
+// 'message' and 'id' point into the text buffer passed to autoReplyParseRequest().
 struct AutoReplyRequest {
   bool is_trigger;
   const char* sender;
   size_t sender_len;
   const char* message;
+  const char* id;        // NULL for a bare keyword
+  size_t id_len;
 };
+
+// Does the message ask for a reply, and does it carry a correlation id?
+//
+// Two forms are accepted: the bare keyword, and the keyword followed by one space
+// and exactly AUTOREPLY_ID_LEN hex characters. **The bare form must keep working
+// indefinitely.** Flashing this fleet takes months, so probes stay bare until
+// adoption is high; a firmware that only answered the id form would silently drop
+// every un-flashed node out of the measurement, and those are exactly the nodes
+// whose connectivity is least understood.
+//
+// The tail is matched strictly -- one space, then hex, then end of string. Anything
+// looser ('test me', 'test 123', trailing text) stays a non-trigger, which is what
+// keeps ordinary chat on the channel from costing everyone airtime.
+static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
+                                         const char** id, size_t* id_len) {
+  *id = NULL;
+  *id_len = 0;
+  if (msg == NULL || keyword == NULL) return false;
+
+  size_t klen = strlen(keyword);
+  if (strncasecmp(msg, keyword, klen) != 0) return false;
+  if (msg[klen] == 0) return true;                 // the bare keyword
+  if (msg[klen] != ' ') return false;
+
+  const char* tail = msg + klen + 1;
+  size_t n = 0;
+  while (n < AUTOREPLY_ID_LEN && isxdigit((unsigned char)tail[n])) n++;
+  if (n != AUTOREPLY_ID_LEN || tail[n] != 0) return false;
+
+  *id = tail;
+  *id_len = n;
+  return true;
+}
 
 // Split a group text into its name prefix and message, and test the message against
 // the trigger keyword. Group texts are "<sender>: <message>" (see
 // BaseChatMesh::sendGroupMessage), and a text without that prefix is treated as all
 // message and no sender. 'text' is modified in place: whitespace around the message
 // is trimmed before the comparison, so " test " still triggers.
+//
+// A reply can never trigger a reply: a reply body begins with the bracketed
+// requester name, or with "SNR" when there was none, and neither can match the
+// keyword. Widening the match to accept a correlation id does not change that,
+// and test/test_autoreply pins it.
 static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* keyword) {
-  AutoReplyRequest req = { false, text, 0, text };
+  AutoReplyRequest req = { false, text, 0, text, NULL, 0 };
   if (text == NULL || keyword == NULL) return req;
 
   char* msg = strstr(text, ": ");
@@ -113,7 +158,7 @@ static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* key
   *end = 0;
 
   req.message = msg;
-  req.is_trigger = strcasecmp(msg, keyword) == 0;
+  req.is_trigger = autoReplyMatchTrigger(msg, keyword, &req.id, &req.id_len);
   return req;
 }
 

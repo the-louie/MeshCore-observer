@@ -271,6 +271,7 @@ protected:
   int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
 
+  bool resolveAutoReplyScope(TransportKey* scope);
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);
 
 public:

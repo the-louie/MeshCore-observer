@@ -3,7 +3,8 @@
 #include <helpers/TxtDataHelpers.h>
 
 #define AUTOREPLY_CONFIG_FILE   "/autoreply"
-#define AUTOREPLY_CONFIG_VER    3
+#define AUTOREPLY_CONFIG_VER    4
+#define AUTOREPLY_CONFIG_VER_3  3    // enabled + hops + direct flood, before delay and region
 #define AUTOREPLY_CONFIG_VER_2  2    // enabled + hops, with no direct reply mode stored
 #define AUTOREPLY_CONFIG_VER_1  1    // channel name + hops, before the channel was derived
 
@@ -29,10 +30,12 @@ static File openWrite(FILESYSTEM* fs, const char* filename) {
 }
 
 AutoReply::AutoReply()
-  : _fs(NULL), _enabled(false), _hops(8), _direct_flood(true), _ready(false),
+  : _fs(NULL), _enabled(false), _hops(8), _direct_flood(true),
+    _delay_factor(AUTOREPLY_DELAY_DEF), _ready(false),
     _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _iata[0] = 0;
+  _region[0] = 0;
   memset(_senders, 0, sizeof(_senders));
   _next_sender = 0;
 }
@@ -80,6 +83,24 @@ void AutoReply::load() {
       file.read(&enabled, 1);
       file.read(&_hops, 1);
       file.read(&direct_flood, 1);
+      file.read(&_delay_factor, 1);
+      file.read((uint8_t *) _region, sizeof(_region));
+      _enabled = enabled != 0;
+      _direct_flood = direct_flood != 0;
+      _region[sizeof(_region) - 1] = 0;
+      // A stored factor outside the range means a truncated or corrupt file; the
+      // default is safer than a zero, which would make every repeater in range
+      // answer at the same instant.
+      if (_delay_factor < AUTOREPLY_DELAY_MIN || _delay_factor > AUTOREPLY_DELAY_MAX) {
+        _delay_factor = AUTOREPLY_DELAY_DEF;
+      }
+    } else if (ver == AUTOREPLY_CONFIG_VER_3) {
+      // v3 predates the delay factor and the reply region; both keep the
+      // constructor defaults, which reproduce v3 behaviour exactly.
+      uint8_t enabled = 0, direct_flood = 1;
+      file.read(&enabled, 1);
+      file.read(&_hops, 1);
+      file.read(&direct_flood, 1);
       _enabled = enabled != 0;
       _direct_flood = direct_flood != 0;
     } else if (ver == AUTOREPLY_CONFIG_VER_2) {
@@ -110,6 +131,8 @@ void AutoReply::save() {
     file.write(&enabled, 1);
     file.write(&_hops, 1);
     file.write(&direct_flood, 1);
+    file.write(&_delay_factor, 1);
+    file.write((const uint8_t *) _region, sizeof(_region));
     file.close();
   }
 }
@@ -173,6 +196,37 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     }
     save();
     strcpy(reply, "OK");
+    return true;
+  }
+
+  if (memcmp(command, "set autoreply.delay ", 20) == 0) {
+    int factor = atoi(&command[20]);
+    if (factor < AUTOREPLY_DELAY_MIN || factor > AUTOREPLY_DELAY_MAX) {
+      sprintf(reply, "Err - must be %d..%d", AUTOREPLY_DELAY_MIN, AUTOREPLY_DELAY_MAX);
+    } else {
+      _delay_factor = (uint8_t)factor;
+      save();
+      strcpy(reply, "OK");
+    }
+    return true;
+  }
+
+  if (strcmp(command, "get autoreply.delay") == 0) {
+    sprintf(reply, "> %d", (uint32_t)_delay_factor);
+    return true;
+  }
+
+  if (memcmp(command, "set autoreply.region ", 21) == 0) {
+    // Empty clears it, which restores the old behaviour of mirroring whatever
+    // scope the request arrived under.
+    StrHelper::strncpy(_region, &command[21], sizeof(_region));
+    save();
+    strcpy(reply, "OK");
+    return true;
+  }
+
+  if (strcmp(command, "get autoreply.region") == 0) {
+    sprintf(reply, "> %s", _region[0] ? _region : "(request scope)");
     return true;
   }
 
@@ -280,8 +334,23 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
     who[0] = 0;
   }
 
+  // The correlation id, echoed so a requester can tie a reply to the request that
+  // provoked it. With reply delays measured in minutes, arrival time can no longer
+  // do that job.
+  char tag[AUTOREPLY_ID_LEN + 3];
+  if (request.id != NULL) {
+    snprintf(tag, sizeof(tag), "#%.*s ", (int)request.id_len, request.id);
+  } else {
+    tag[0] = 0;
+  }
+
+  // Field order is a decision, not a default: snprintf truncates from the right,
+  // and AUTOREPLY_MAX_TEXT is 112 against a name, a bracketed requester and a path
+  // that can each be long. The id sits ahead of the measurements so a crowded
+  // reply loses path hashes -- which already truncate gracefully with ".." -- before
+  // it loses the thing that says which request this answers.
   char* out = (char *) &dest[5];
-  snprintf(out, AUTOREPLY_MAX_TEXT, "%s: %sSNR %s RSSI %d %dh %s", node_name, who,
+  snprintf(out, AUTOREPLY_MAX_TEXT, "%s: %s%sSNR %s RSSI %d %dh %s", node_name, who, tag,
            StrHelper::ftoa(req->getSNR()), (int)rssi, (uint32_t)hop_count, path_hex);
 
   MESH_DEBUG_PRINTLN("AutoReply: replying '%s'", out);

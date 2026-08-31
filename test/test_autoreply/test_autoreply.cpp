@@ -147,13 +147,90 @@ TEST(ParseRequest, RejectsOtherMessages) {
   }
 }
 
-TEST(ParseRequest, KeywordMustStandAlone) {
-  // The reply costs airtime, so only a message that is exactly the keyword counts.
+TEST(ParseRequest, KeywordStandsAloneOrCarriesAnId) {
+  // The reply costs airtime, so the tail is matched strictly: the bare keyword, or
+  // the keyword plus exactly AUTOREPLY_ID_LEN hex characters. 'test 123' is still
+  // ordinary chat and still costs nobody anything.
   char text[128];
   copyText(text, sizeof(text), "Louie: test 123");
   AutoReplyRequest r = autoReplyParseRequest(text, "test");
   EXPECT_FALSE(r.is_trigger);
   EXPECT_STREQ("test 123", r.message);
+}
+
+TEST(ParseRequest, BareKeywordStillTriggersAndCarriesNoId) {
+  // Load-bearing for months: flashing this fleet is slow, so probes stay bare
+  // until adoption is high. A firmware that only answered the id form would drop
+  // every un-flashed node out of the measurement.
+  char text[128];
+  copyText(text, sizeof(text), "Louie: test");
+  AutoReplyRequest r = autoReplyParseRequest(text, "test");
+  EXPECT_TRUE(r.is_trigger);
+  EXPECT_EQ(nullptr, r.id);
+  EXPECT_EQ((size_t)0, r.id_len);
+}
+
+TEST(ParseRequest, KeywordWithACorrelationIdTriggers) {
+  char text[128];
+  copyText(text, sizeof(text), "Louie: test a1b2c3d4");
+  AutoReplyRequest r = autoReplyParseRequest(text, "test");
+  ASSERT_TRUE(r.is_trigger);
+  ASSERT_NE(nullptr, r.id);
+  EXPECT_EQ((size_t)AUTOREPLY_ID_LEN, r.id_len);
+  EXPECT_EQ(std::string("a1b2c3d4"), std::string(r.id, r.id_len));
+}
+
+TEST(ParseRequest, CorrelationIdIsHexOfExactlyTheRightLength) {
+  const char* bad[] = {
+    "Louie: test a1b2c3d",     // seven
+    "Louie: test a1b2c3d4e",   // nine
+    "Louie: test a1b2c3dg",    // not hex
+    "Louie: test  a1b2c3d4",   // two spaces
+    "Louie: test a1b2c3d4 ",   // trailing space is trimmed, so this is the id form
+    "Louie: test a1b2c3d4x",   // trailing junk
+    "Louie: testa1b2c3d4",     // no separator
+    // A *wrong* separator followed by eight valid hex characters. Without the
+    // explicit space check these ride in on the length rule alone.
+    "Louie: test-a1b2c3d4",
+    "Louie: test:a1b2c3d4",
+    "Louie: test_a1b2c3d4",
+    "Louie: test.a1b2c3d4",
+  };
+  for (const char* s : bad) {
+    char text[128];
+    copyText(text, sizeof(text), s);
+    bool trigger = autoReplyParseRequest(text, "test").is_trigger;
+    // The trailing-space case is trimmed before matching, so it *is* a trigger.
+    if (std::string(s) == "Louie: test a1b2c3d4 ") EXPECT_TRUE(trigger) << s;
+    else EXPECT_FALSE(trigger) << s;
+  }
+}
+
+TEST(ParseRequest, CorrelationIdIsCaseInsensitiveHex) {
+  char text[128];
+  copyText(text, sizeof(text), "Louie: TEST A1B2C3D4");
+  AutoReplyRequest r = autoReplyParseRequest(text, "test");
+  ASSERT_TRUE(r.is_trigger);
+  EXPECT_EQ(std::string("A1B2C3D4"), std::string(r.id, r.id_len));
+}
+
+TEST(ParseRequest, AReplyCanNeverTriggerAReply) {
+  // The invariant the whole-string match used to guarantee for free. A reply body
+  // begins with the bracketed requester name, or with "SNR" when there was none,
+  // and neither can match the keyword however the tail is parsed. Widening the
+  // match must not cost this, or two repeaters could answer each other forever.
+  const char* replies[] = {
+    "SE-JKG-Rep: [SE-JKG-LouHome-A] #a1b2c3d4 SNR 1.0 RSSI -100 2h AA,BB",
+    "SE-JKG-Rep: [SE-JKG-LouHome-A] SNR 1.0 RSSI -100 0h direct",
+    "SE-JKG-Rep: SNR 1.0 RSSI -100 0h direct",
+    "SE-JKG-Rep: [test] SNR 1.0 RSSI -100 0h direct",
+    "SE-JKG-Rep: [test a1b2c3d4] SNR 1.0 RSSI -100 0h direct",
+  };
+  for (const char* s : replies) {
+    char text[256];
+    copyText(text, sizeof(text), s);
+    EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << s;
+  }
 }
 
 TEST(ParseRequest, PrefixNeedsColonAndSpace) {

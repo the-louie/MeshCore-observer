@@ -16,6 +16,13 @@
 #define AUTOREPLY_MAX_SENDER  16
 // '#test-' plus a three-character region code, rebuilt on the stack when needed
 #define AUTOREPLY_MAX_CHANNEL 16
+// a region name bounding how far a reply floods, or empty for the request's own scope
+#define AUTOREPLY_MAX_REGION  31
+// multiplier on the radio's own retransmit delay, spreading replies so the storms
+// several repeaters raise do not land on top of each other
+#define AUTOREPLY_DELAY_MIN   1
+#define AUTOREPLY_DELAY_MAX   120
+#define AUTOREPLY_DELAY_DEF   4
 #define AUTOREPLY_MAX_PAYLOAD (5 + AUTOREPLY_MAX_TEXT)   // timestamp + flags + text
 
 // how many replies this repeater will send in total, per AUTOREPLY_WINDOW_SECS
@@ -46,6 +53,8 @@ class AutoReply {
   char _iata[8];                // region the channel was derived from
   uint8_t _hops;                // max hop count of a request we will answer
   bool _direct_flood;           // flood the answer to a request that arrived direct
+  uint8_t _delay_factor;        // multiplier on the radio retransmit delay
+  char _region[AUTOREPLY_MAX_REGION + 1];   // scope for the reply, empty = mirror the request
   bool _ready;
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
@@ -73,6 +82,8 @@ public:
    * \brief  Whether a request that arrived direct is answered with a flood.
    */
   bool directFlood() const { return _direct_flood; }
+  uint8_t delayFactor() const { return _delay_factor; }
+  const char* replyRegion() const { return _region; }
 
   /**
    * \brief  Match our channel, for Mesh::searchChannelsByHash()
