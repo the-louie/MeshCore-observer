@@ -600,9 +600,9 @@ TEST(FormatResult, TheBufferFitsTheLongestPossibleLine) {
 // ---- guard rails on the trigger -----------------------------------------------
 
 TEST(BroadcastGuard, RecognisesTheBroadcastTopic) {
-  EXPECT_TRUE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/cmd"));
-  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/a1b2c3d4/cmd"));
-  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/res"));
+  EXPECT_TRUE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/all/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/a1b2c3d4/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/all/res"));
   EXPECT_FALSE(mqttCtrlTopicIsBroadcast("all/cmd"));   // no region segment
   EXPECT_FALSE(mqttCtrlTopicIsBroadcast(NULL));
 }
@@ -613,14 +613,14 @@ TEST(BroadcastGuard, ATransmitCommandMayNotBeAddressedToEveryNode) {
   // then transmitting inside the same few seconds and each within budget. The
   // workspace rule is that no design may scale transmissions with the node count.
   EXPECT_EQ(MQTTCTRL_ERR_BROADCAST_TRANSMIT,
-            mqttCtrlTransmitTopicResult(true, "meshcore/JKG/all/cmd"));
-  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(true, "meshcore/JKG/a1b2c3d4/cmd"));
+            mqttCtrlTransmitTopicResult(true, "meshhealth/v1/JKG/all/cmd"));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(true, "meshhealth/v1/JKG/a1b2c3d4/cmd"));
 }
 
 TEST(BroadcastGuard, ABroadcastParameterChangeIsStillAllowed) {
   // Setting a value costs no airtime, so fleet-wide configuration stays possible.
   // Only transmitting is refused.
-  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, "meshcore/JKG/all/cmd"));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, "meshhealth/v1/JKG/all/cmd"));
   EXPECT_FALSE(mqttCtrlIsTransmitCommand("set autoreply.delay 8", 21));
   EXPECT_TRUE(mqttCtrlIsTransmitCommand("trigger test", 12));
 }

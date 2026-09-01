@@ -105,7 +105,7 @@ an absent setting.
 
 ### A transmit command may not be broadcast
 
-`trigger test` sent to `meshcore/{IATA}/all/cmd` is refused, on principle rather than on
+`trigger test` sent to `meshhealth/v1/{IATA}/all/cmd` is refused, on principle rather than on
 budget.
 
 The rate limits are per node — four triggers an hour each. That bounds what one node does and
