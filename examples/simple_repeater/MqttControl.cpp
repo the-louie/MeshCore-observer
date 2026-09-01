@@ -5,7 +5,11 @@
 #define MQTTCTRL_CONFIG_FILE  "/mqttcontrol"
 #define MQTTCTRL_CONFIG_VER   1
 
-#define MQTTCTRL_TOPIC_PREFIX "meshhealth/v1/"
+// The broker permits meshcore/ and silently discards everything else -- a publish
+// elsewhere is accepted, acked and dropped, with no error visible to the sender.
+// Measured against mqtt.meshat.se on 2026-09-01: meshcore/JKG/<node>/cmd arrives,
+// meshhealth/v1/JKG/<node>/cmd does not. This is the topic CLAUDE.md specified.
+#define MQTTCTRL_TOPIC_PREFIX "meshcore/"
 
 // Same shape as AutoReply's: the filesystem call differs per platform, and each
 // feature keeps its own copy rather than adding a shared header upstream edits.

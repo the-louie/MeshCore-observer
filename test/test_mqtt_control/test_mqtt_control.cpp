@@ -154,8 +154,8 @@ TEST(SignedMessage, BindsTheTopicSoOneSignatureFitsOneDestination) {
 
   uint8_t a[MQTTCTRL_MAX_SIGNED], b[MQTTCTRL_MAX_SIGNED];
   size_t alen = 0, blen = 0;
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/AA04/cmd", &e, a, sizeof(a), &alen));
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/BB05/cmd", &e, b, sizeof(b), &blen));
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/AA04/cmd", &e, a, sizeof(a), &alen));
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/BB05/cmd", &e, b, sizeof(b), &blen));
 
   // Same payload, different node: the verified bytes must differ, so a command
   // captured from one node cannot be replayed at another.
@@ -168,8 +168,8 @@ TEST(SignedMessage, PerNodeAndBroadcastAreDistinct) {
   MqttCtrlEnvelope& e = h.env;
   uint8_t one[MQTTCTRL_MAX_SIGNED], all[MQTTCTRL_MAX_SIGNED];
   size_t l1 = 0, l2 = 0;
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/AA04/cmd", &e, one, sizeof(one), &l1));
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/all/cmd", &e, all, sizeof(all), &l2));
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/AA04/cmd", &e, one, sizeof(one), &l1));
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/all/cmd", &e, all, sizeof(all), &l2));
   EXPECT_FALSE(l1 == l2 && memcmp(one, all, l1) == 0);
 }
 
@@ -187,7 +187,7 @@ TEST(SignedMessage, RefusesToOverrunOrTakeAnEmptyTopic) {
   MqttCtrlEnvelope& e = h.env;
   uint8_t small[8];
   size_t len = 0;
-  EXPECT_FALSE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/AA04/cmd", &e, small, sizeof(small), &len));
+  EXPECT_FALSE(mqttCtrlBuildSignedMessage("meshcore/JKG/AA04/cmd", &e, small, sizeof(small), &len));
   uint8_t out[MQTTCTRL_MAX_SIGNED];
   EXPECT_FALSE(mqttCtrlBuildSignedMessage("", &e, out, sizeof(out), &len));
   EXPECT_FALSE(mqttCtrlBuildSignedMessage(std::string(MQTTCTRL_MAX_TOPIC + 1, 'x').c_str(),
@@ -413,12 +413,12 @@ TEST(RateLimit, TriggerCapIsTighterThanTheGeneralCap) {
 // this goes wrong quietly: a canonicalisation difference of one byte produces a
 // signature that never verifies, and the failure looks like a broken radio.
 static const char* GOLDEN_PUB =
-    "7EA0E3BD52E207C9D3B0EBA65C0704E66FCA2D8E165A175218B174FC4160E413";
-static const char* GOLDEN_TOPIC = "meshhealth/v1/JKG/AA04792D/cmd";
+    "C9571EEB4AA9DE1159858BC6A3D4A626C4F4845E8EEBD5F554B2EC0F50C68860";
+static const char* GOLDEN_TOPIC = "meshcore/JKG/AA04792D/cmd";
 static const char* GOLDEN_PAYLOAD =
     "v1|42|1788000600|set autoreply.hops 5|"
-    "8E289084F3DCA469EFD0863FA647CA58CD2081C987A19A703DCF8FA4DEC5CE2E"
-    "7BF752E387CC51F3DC4C8553B8ABE99F2492DF74606F95E43F91C1686C8C3E0A";
+    "D6E615B85660933377ACE10C946A42DFABFFC5CF9736CA6D6FEF25B863170241"
+    "A4FFA470C77D30CFD1D47F37D1E3DB380287AE108E243C452D83993B619DB408";
 
 static void hexToBytes(const char* hex, uint8_t* out, size_t n) {
   for (size_t i = 0; i < n; i++) out[i] = (uint8_t)mqttCtrlHexByte(hex[i * 2], hex[i * 2 + 1]);
@@ -448,7 +448,7 @@ TEST(GoldenEnvelope, TheSameSignatureIsRefusedAtAnotherNode) {
             mqttCtrlParseEnvelope(GOLDEN_PAYLOAD, strlen(GOLDEN_PAYLOAD), &env));
   uint8_t signed_bytes[MQTTCTRL_MAX_SIGNED];
   size_t signed_len = 0;
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/BB05DEAD/cmd", &env,
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/BB05DEAD/cmd", &env,
                                          signed_bytes, sizeof(signed_bytes), &signed_len));
   uint8_t pub[32];
   hexToBytes(GOLDEN_PUB, pub, sizeof(pub));
@@ -601,9 +601,9 @@ TEST(FormatResult, TheBufferFitsTheLongestPossibleLine) {
 // ---- guard rails on the trigger -----------------------------------------------
 
 TEST(BroadcastGuard, RecognisesTheBroadcastTopic) {
-  EXPECT_TRUE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/all/cmd"));
-  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/a1b2c3d4/cmd"));
-  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshhealth/v1/JKG/all/res"));
+  EXPECT_TRUE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/a1b2c3d4/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/res"));
   EXPECT_FALSE(mqttCtrlTopicIsBroadcast("all/cmd"));   // no region segment
   EXPECT_FALSE(mqttCtrlTopicIsBroadcast(NULL));
 }
@@ -614,14 +614,14 @@ TEST(BroadcastGuard, ATransmitCommandMayNotBeAddressedToEveryNode) {
   // then transmitting inside the same few seconds and each within budget. The
   // workspace rule is that no design may scale transmissions with the node count.
   EXPECT_EQ(MQTTCTRL_ERR_BROADCAST_TRANSMIT,
-            mqttCtrlTransmitTopicResult(true, "meshhealth/v1/JKG/all/cmd"));
-  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(true, "meshhealth/v1/JKG/a1b2c3d4/cmd"));
+            mqttCtrlTransmitTopicResult(true, "meshcore/JKG/all/cmd"));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(true, "meshcore/JKG/a1b2c3d4/cmd"));
 }
 
 TEST(BroadcastGuard, ABroadcastParameterChangeIsStillAllowed) {
   // Setting a value costs no airtime, so fleet-wide configuration stays possible.
   // Only transmitting is refused.
-  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, "meshhealth/v1/JKG/all/cmd"));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, "meshcore/JKG/all/cmd"));
   EXPECT_FALSE(mqttCtrlIsTransmitCommand("set autoreply.delay 8", 21));
   EXPECT_TRUE(mqttCtrlIsTransmitCommand("trigger test", 12));
 }
@@ -755,11 +755,11 @@ TEST(PrefixBoundary, ShorterThanThePrefixNeverReadsPastTheCommand) {
 
 static const char* READ_PUB =
     "6B734A8EFF246FE734B38D4046C148EEE5F04FE87B3A0A423955A77956DE066B";
-static const char* READ_TOPIC = "meshhealth/v1/JKG/AA04792D/cmd";
+static const char* READ_TOPIC = "meshcore/JKG/AA04792D/cmd";
 static const char* READ_PAYLOAD =
     "v1|43|1788000600|get txdelay|"
-    "88EE53B94B58689F3A4DFC4994E4DB4098B56EF4CE7DD2DF5B9A43A734B542D9"
-    "29AF05DDC70EE10EA02D46B0B316821953F8C9B727F28693C0FAF23659F8F105";
+    "2C22F81168EE96B8598B70B29B951DF365876413AC6C1B6CE1C14CB3E7D3E2BD"
+    "563F7F0905EE12EE5E41273B3CA515E50504CFD96D57D16A12DBD07D0BCDFD04";
 
 TEST(GoldenRead, TheCommandT12SendsVerifiesAndIsAllowed) {
   MqttCtrlEnvelope env;
@@ -795,7 +795,7 @@ TEST(GoldenRead, TheSameReadIsRefusedAtAnotherNode) {
 
   uint8_t signed_bytes[MQTTCTRL_MAX_SIGNED];
   size_t signed_len = 0;
-  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/BB05C3D1/cmd", &env,
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshcore/JKG/BB05C3D1/cmd", &env,
                                          signed_bytes, sizeof(signed_bytes), &signed_len));
   uint8_t pub[32];
   hexToBytes(READ_PUB, pub, sizeof(pub));

@@ -30,13 +30,22 @@ provisioned. Refusing and clearing are the same act (`mqttCtrlOwnerReady`, teste
 ## Topics
 
 ```
-meshhealth/v1/{IATA}/{NODE}/cmd     to one node
-meshhealth/v1/{IATA}/all/cmd        to every node in the region
-meshhealth/v1/{IATA}/{NODE}/res     the node's answer
+meshcore/{IATA}/{NODE}/cmd     to one node
+meshcore/{IATA}/all/cmd        to every node in the region
+meshcore/{IATA}/{NODE}/res     the node's answer
 ```
 
-`{NODE}` is the first four bytes of the node's public key, in hex. A project-specific prefix,
-not `meshcore/`, so control traffic stays out of the namespace observer tooling watches.
+`{NODE}` is the first four bytes of the node's public key, in hex.
+
+**The prefix must be `meshcore/`.** The broker permits that namespace and silently discards
+everything else: a publish elsewhere is accepted, QoS-1 acked, and dropped, with no error the
+publisher can see. This was measured against `mqtt.meshat.se` on 2026-09-01, after every signed
+command to a correctly configured node went unanswered — `meshcore/JKG/<node>/cmd` arrives,
+`meshhealth/v1/JKG/<node>/cmd` does not.
+
+An earlier version used a project-specific prefix to keep control traffic out of the namespace
+observer tooling watches. That separation was never needed: the tooling matches on the leaf
+(`+/packets`, `+/status`), so `/cmd` and `/res` never collided with it.
 
 ## The envelope
 
@@ -114,7 +123,7 @@ an absent setting.
 
 ### A transmit command may not be broadcast
 
-`trigger test` sent to `meshhealth/v1/{IATA}/all/cmd` is refused, on principle rather than on
+`trigger test` sent to `meshcore/{IATA}/all/cmd` is refused, on principle rather than on
 budget.
 
 The rate limits are per node — four triggers an hour each. That bounds what one node does and
@@ -142,7 +151,7 @@ anything.
 A node that verified a command publishes the outcome to its own result topic:
 
 ```
-meshhealth/v1/{IATA}/{NODE}/res
+meshcore/{IATA}/{NODE}/res
 r1|<counter>|<code>|<command>|<reply>
 ```
 
