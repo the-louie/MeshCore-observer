@@ -121,8 +121,10 @@ void MqttControl::stage(const char* topic, const uint8_t* payload, size_t len) {
 }
 
 MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
-                                  MqttCommandRunner* runner, char* reply, size_t reply_size) {
+                                  MqttCommandRunner* runner, char* reply, size_t reply_size,
+                                  bool* authentic) {
   if (reply != NULL && reply_size > 0) reply[0] = 0;
+  if (authentic != NULL) *authentic = false;
   if (!_staged.pending) return MQTTCTRL_OK;
 
   MqttCtrlResult result = MQTTCTRL_OK;
@@ -147,6 +149,9 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
       result = MQTTCTRL_ERR_SIG_INVALID;   // parsed as hex, did not verify
       break;
     }
+    // Past this line the sender held the owner key, so the outcome is safe to
+    // publish however it turns out.
+    if (authentic != NULL) *authentic = true;
 
     result = mqttCtrlAuthorise(&env, _counter, now);
     if (result != MQTTCTRL_OK) break;

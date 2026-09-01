@@ -711,6 +711,18 @@ public:
     _control_topic_count = topic_count;
   }
 
+  // The answering half of the control plane: the sink verifies and executes on
+  // the loop task, then publishes the outcome here. Deliberately narrow rather
+  // than exposing publishToAllSlots -- a caller gets to answer on the control
+  // plane, not a general publish-anywhere. Not retained: a result describes one
+  // command at one moment, and a retained one would be replayed to every later
+  // subscriber as though it were current. Returns false when no slot is
+  // connected, which is a normal outcome and not an error.
+  bool publishControlResult(const char* topic, const char* payload, size_t len) {
+    if (topic == NULL || topic[0] == 0 || payload == NULL || len == 0) return false;
+    return publishToAllSlots(topic, payload, len, false, 0);
+  }
+
 private:
   ControlSink* _control_sink = NULL;
   const char* const* _control_topics = NULL;

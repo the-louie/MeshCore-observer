@@ -80,8 +80,18 @@ public:
   // it through 'mesh' if it passes, writing a human-readable outcome into 'reply'
   // (at least 160 bytes, the CLI's own budget). Returns the verdict either way, so
   // the caller can publish a refusal without having to guess why.
+  // 'authentic', when given, is set true the moment the signature verifies and
+  // stays false otherwise. It is what decides whether a result may be published:
+  // verification happens before the rate limiter (deliberately -- the limiters
+  // spend budget when asked, so every stateless check runs first), which means a
+  // bad-signature refusal is not rate limited. Publishing those would let anyone
+  // on a broker whose credentials are public drive unlimited publishes out of
+  // this node by sending garbage. A flag set at the point of truth, rather than
+  // a classification of result codes, so a code added later cannot drift into
+  // the wrong half.
   MqttCtrlResult drain(const mesh::Identity& owner, uint32_t now,
-                       MqttCommandRunner* runner, char* reply, size_t reply_size);
+                       MqttCommandRunner* runner, char* reply, size_t reply_size,
+                       bool* authentic = NULL);
 
   bool handleCommand(const char* command, char* reply);
 };

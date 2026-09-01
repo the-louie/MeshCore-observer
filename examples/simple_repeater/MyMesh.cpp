@@ -1798,9 +1798,35 @@ void MyMesh::loopMqttControl() {
   }
 
   char reply[160];
+  bool authentic = false;
   MqttCtrlResult result = mqtt_control.drain(owner, getRTCClock()->getCurrentTime(),
-                                             this, reply, sizeof(reply));
+                                             this, reply, sizeof(reply), &authentic);
   MESH_DEBUG_PRINTLN("MqttControl: result %d, reply '%s'", (uint32_t)result, reply);
+
+  // Only an outcome the owner key vouched for is published -- see the note on
+  // drain(). A refusal that got this far still publishes: a node that refuses in
+  // silence is indistinguishable from one that is switched off or un-flashed,
+  // and this fleet runs several firmware versions at once, so that ambiguity is
+  // exactly what makes it unreadable.
+  if (authentic) publishMqttControlResult(result, reply);
+}
+
+// The result topic is built once in setupMqttControl and is empty when the node
+// has no region, in which case there is no control plane to answer on.
+void MyMesh::publishMqttControlResult(MqttCtrlResult result, const char* reply) {
+  if (bridge == NULL || _ctrl_result[0] == 0) return;
+
+  // A refusal runs no command and so leaves the reply buffer empty. Publishing
+  // the bare code keeps the answer non-empty, which is what lets a requester
+  // tell "refused" from "never arrived".
+  char payload[192];
+  int n = (reply != NULL && reply[0] != 0)
+            ? snprintf(payload, sizeof(payload), "%s", reply)
+            : snprintf(payload, sizeof(payload), "err %d", (int)result);
+  if (n <= 0) return;
+  if (n >= (int)sizeof(payload)) n = (int)sizeof(payload) - 1;
+
+  bridge->publishControlResult(_ctrl_result, payload, (size_t)n);
 }
 
 #endif
