@@ -89,6 +89,15 @@ The reads change nothing and cannot be replayed into anything, which is what kee
 argument simple. There is deliberately **no `set`** among them: we do not yet know which values
 we would write, and a write would need an argument this design has not had to make.
 
+**The two groups match differently, and the difference is the point.** The first three are
+*families*: the boundary rule lets `set autoreply` cover `set autoreply.hops 8` and the rest,
+one entry instead of five. The reads are *exact* — each admits the command it names and nothing
+else. A family silently admits children nobody listed, and `get radio` was admitting
+`get radio.rxgain`, `get radio.fem.rxgain` and `get radio foo` that way. Harmless values, but
+this list exists to be read by an operator deciding what a node exposes, and an entry that
+admits more than it says defeats that. Adding `get af.thing` to `CommonCLI` later cannot reach
+the mesh without someone also adding it here.
+
 Everything else is refused before it reaches the CLI. The allowlist is deliberately independent
 of the second guard: MQTT commands run with the node's clock rather than the `0` that marks a
 locally-privileged caller, so `set prv.key`, `erase` and `set mqtt.owner` refuse them anyway.

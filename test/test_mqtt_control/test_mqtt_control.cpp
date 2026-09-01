@@ -877,3 +877,64 @@ TEST(PrivateKey, ASignedRequestForItIsRefusedAtAuthorisation) {
   ASSERT_EQ(MQTTCTRL_OK, parse(envelope("v1|9|1788200000|set prv.key deadbeef"), &env));
   EXPECT_EQ(MQTTCTRL_ERR_NOT_ALLOWED, mqttCtrlAuthorise(&env, 8, 1788199000));
 }
+
+// ---- exact entries admit the command they name, and nothing else --------------
+//
+// Operator review, 2026-09-01: the allowlist is read to decide what a node exposes,
+// so an entry admitting more than it says defeats the reading. `get radio` was
+// admitting two children and a junk tail through the boundary rule.
+
+TEST(ExactEntries, AReadAdmitsOnlyTheBareCommand) {
+  EXPECT_TRUE(allowed("get radio"));
+  EXPECT_TRUE(allowed("get af"));
+  EXPECT_TRUE(allowed("get int.thresh"));       // the dot is in the name, not a boundary
+  EXPECT_TRUE(allowed("get direct.txdelay"));
+}
+
+TEST(ExactEntries, ChildrenOfAReadAreNoLongerAdmitted) {
+  // These exist in CommonCLI and were reachable over MQTT purely because the
+  // boundary rule treats '.' as a separator.
+  EXPECT_FALSE(allowed("get radio.rxgain"));
+  EXPECT_FALSE(allowed("get radio.fem.rxgain"));
+
+  // And one that does not exist yet: adding `get af.thing` to the CLI later must
+  // not publish it to the mesh as a side effect.
+  EXPECT_FALSE(allowed("get af.anything"));
+  EXPECT_FALSE(allowed("get txdelay.x"));
+}
+
+TEST(ExactEntries, ATrailingArgumentOnAReadIsRefused) {
+  // A get takes no argument. The CLI would ignore the tail and answer anyway, so
+  // refusing here keeps the allowlist the tighter gate.
+  EXPECT_FALSE(allowed("get radio foo"));
+  EXPECT_FALSE(allowed("get af 1"));
+  EXPECT_FALSE(allowed("get txdelay 0.5"));
+}
+
+TEST(ExactEntries, TheFamiliesStillMatchAsPrefixes) {
+  // The boundary rule is load-bearing on these three; making them exact would
+  // break the sprint's own features.
+  EXPECT_TRUE(allowed("set autoreply on"));
+  EXPECT_TRUE(allowed("set autoreply.hops 8"));
+  EXPECT_TRUE(allowed("set autoreply.delay 12"));
+  EXPECT_TRUE(allowed("set autoreply.direct.flood off"));
+  EXPECT_TRUE(allowed("set autoreply.region JKG"));
+  EXPECT_TRUE(allowed("get autoreply"));
+  EXPECT_TRUE(allowed("get autoreply.channel"));
+  EXPECT_TRUE(allowed("trigger test"));
+  EXPECT_TRUE(allowed("trigger test a1b2c3d4"));
+}
+
+TEST(ExactEntries, ExactMatchingIsStillCaseInsensitive) {
+  EXPECT_TRUE(allowed("GET RADIO"));
+  EXPECT_TRUE(allowed("Get Af"));
+}
+
+TEST(ExactEntries, ExactMatchingUsesTheGivenLengthNotATerminator) {
+  // Same trap as the boundary rule: the command is a byte range in the payload,
+  // not a C string, so a short command must not match by reading past its end.
+  const char payload[] = "get radio.rxgain";
+  EXPECT_FALSE(mqttCtrlExactCommand(payload, 5, "get radio"));   // "get r"
+  EXPECT_TRUE(mqttCtrlExactCommand(payload, 9, "get radio"));    // "get radio"
+  EXPECT_FALSE(mqttCtrlExactCommand(payload, 16, "get radio"));  // the whole thing
+}

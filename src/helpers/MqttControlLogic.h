@@ -309,30 +309,57 @@ static inline bool mqttCtrlPrefixWithBoundary(const char* command, size_t len,
 // locally-privileged commands refuse a remote caller, and this list means a
 // mistake there is still not a compromise. Either alone should keep 'set prv.key'
 // unreachable; both together mean one of them can be wrong.
+// How one allowlist entry matches.
+//
+// A *family* entry uses the boundary rule, so `set autoreply` covers
+// `set autoreply.hops 8` and every other autoreply setting -- one entry instead
+// of five, which is why the boundary rule exists at all.
+//
+// An *exact* entry admits the bare command and nothing else. The cost of a family
+// is that it admits children nobody listed: `get radio` silently admitted
+// `get radio.rxgain` and `get radio.fem.rxgain`, and `get radio foo` besides.
+// Those are harmless read-only values, but this list exists to be *reviewed*, and
+// an entry that admits more than it says defeats the review. None of the reads
+// have children worth reaching, so all of them are exact -- and a `get af.thing`
+// added to the CLI later cannot reach the mesh without someone adding it here too.
+struct MqttCtrlAllowEntry {
+  const char* text;
+  bool exact;
+};
+
+// The bare command, and nothing after it.
+static inline bool mqttCtrlExactCommand(const char* command, size_t len, const char* text) {
+  size_t tlen = strlen(text);
+  return len == tlen && strncasecmp(command, text, tlen) == 0;
+}
+
 static inline bool mqttCtrlCommandAllowed(const char* command, size_t len) {
   if (!mqttCtrlCommandCharsOk(command, len)) return false;
 
-  static const char* const allowed[] = {
-    "set autoreply",              // covers on|off and every autoreply.* setting
-    "get autoreply",
-    "trigger test",
+  static const MqttCtrlAllowEntry allowed[] = {
+    // Families. The boundary rule is load-bearing on these three: make them exact
+    // and `set autoreply.hops 8` and `trigger test a1b2c3d4` both stop working.
+    { "set autoreply", false },   // covers on|off and every autoreply.* setting
+    { "get autoreply", false },
+    { "trigger test",  false },   // covers the optional 8-hex correlation id
 
-    // Read-only. Each one changes nothing, cannot be replayed into anything, and
-    // answers a question the model currently cannot ask: txdelay on the four
-    // repeaters that answer is the largest unexplained gap in it, and three of
-    // those four are somebody else's hardware. No `set` here -- a read keeps the
-    // security argument simple, and we do not yet know which values we would
-    // write.
-    "get txdelay",
-    "get direct.txdelay",         // the direct-path counterpart; the model needs both
-    "get rxdelay",
-    "get af",                     // airtime factor -- the duty-cycle budget
-    "get cad",
-    "get int.thresh",
-    "get radio",                  // freq, bandwidth, spreading factor, coding rate
+    // Reads. Each admits exactly the command it names. All read-only: they change
+    // nothing and cannot be replayed into anything, which is what keeps the
+    // argument for having them simple. Deliberately no `set` here.
+    { "get txdelay",        true },
+    { "get direct.txdelay", true },
+    { "get rxdelay",        true },
+    { "get af",             true },
+    { "get cad",            true },
+    { "get int.thresh",     true },
+    { "get radio",          true },
   };
+
   for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
-    if (mqttCtrlPrefixWithBoundary(command, len, allowed[i])) return true;
+    bool ok = allowed[i].exact
+                ? mqttCtrlExactCommand(command, len, allowed[i].text)
+                : mqttCtrlPrefixWithBoundary(command, len, allowed[i].text);
+    if (ok) return true;
   }
   return false;
 }
