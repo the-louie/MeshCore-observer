@@ -740,3 +740,63 @@ TEST(PrefixBoundary, ShorterThanThePrefixNeverReadsPastTheCommand) {
   EXPECT_FALSE(mqttCtrlPrefixWithBoundary(payload, 5, "get af")) << "matched past the command";
   EXPECT_TRUE(mqttCtrlPrefixWithBoundary(payload, 6, "get af"));
 }
+
+// ---- the exact command T-12 sends ---------------------------------------------
+//
+// The golden fixture above covers `set autoreply.hops 5`, which existed before this
+// sprint. T-12 reads a value back with `get txdelay` -- a command that only became
+// sendable when T-09 widened the allowlist -- so it gets its own fixture, produced
+// by panopticon/control.py and verified here by the firmware's own Ed25519.
+//
+// Proving this offline removes the whole class of on-hardware surprises where a
+// signature never verifies and the node simply stays silent, which is
+// indistinguishable from a node that was never listening.
+
+static const char* READ_PUB =
+    "6B734A8EFF246FE734B38D4046C148EEE5F04FE87B3A0A423955A77956DE066B";
+static const char* READ_TOPIC = "meshhealth/v1/JKG/AA04792D/cmd";
+static const char* READ_PAYLOAD =
+    "v1|43|1788000600|get txdelay|"
+    "88EE53B94B58689F3A4DFC4994E4DB4098B56EF4CE7DD2DF5B9A43A734B542D9"
+    "29AF05DDC70EE10EA02D46B0B316821953F8C9B727F28693C0FAF23659F8F105";
+
+TEST(GoldenRead, TheCommandT12SendsVerifiesAndIsAllowed) {
+  MqttCtrlEnvelope env;
+  ASSERT_EQ(MQTTCTRL_OK,
+            mqttCtrlParseEnvelope(READ_PAYLOAD, strlen(READ_PAYLOAD), &env));
+  EXPECT_EQ(43u, env.counter);
+  EXPECT_EQ(std::string("get txdelay"), std::string(env.command, env.command_len));
+
+  uint8_t signed_bytes[MQTTCTRL_MAX_SIGNED];
+  size_t signed_len = 0;
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage(READ_TOPIC, &env, signed_bytes,
+                                         sizeof(signed_bytes), &signed_len));
+  uint8_t pub[32];
+  hexToBytes(READ_PUB, pub, sizeof(pub));
+  EXPECT_EQ(1, ed25519_verify(env.signature, signed_bytes, signed_len, pub));
+
+  // Verifying is not enough -- it must also survive authorisation, which is where
+  // a command absent from the allowlist would be refused.
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlAuthorise(&env, 42, 1788000100));
+
+  // And it must not be treated as a transmit, or it would spend a trigger slot
+  // and be refused on the broadcast topic.
+  EXPECT_FALSE(mqttCtrlIsTransmitCommand(env.command, env.command_len));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, READ_TOPIC));
+}
+
+TEST(GoldenRead, TheSameReadIsRefusedAtAnotherNode) {
+  // The topic is inside the signature, so a read captured off the public broker
+  // cannot be replayed at a different node.
+  MqttCtrlEnvelope env;
+  ASSERT_EQ(MQTTCTRL_OK,
+            mqttCtrlParseEnvelope(READ_PAYLOAD, strlen(READ_PAYLOAD), &env));
+
+  uint8_t signed_bytes[MQTTCTRL_MAX_SIGNED];
+  size_t signed_len = 0;
+  ASSERT_TRUE(mqttCtrlBuildSignedMessage("meshhealth/v1/JKG/BB05C3D1/cmd", &env,
+                                         signed_bytes, sizeof(signed_bytes), &signed_len));
+  uint8_t pub[32];
+  hexToBytes(READ_PUB, pub, sizeof(pub));
+  EXPECT_EQ(0, ed25519_verify(env.signature, signed_bytes, signed_len, pub));
+}
