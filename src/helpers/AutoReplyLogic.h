@@ -130,6 +130,58 @@ static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
   return true;
 }
 
+// Parse `trigger <keyword>` / `trigger <keyword> <8 hex>`, the command a signed
+// MQTT envelope carries to make this node originate a probe.
+//
+// The id is **echoed, never generated here**. The requester mints it, so the
+// requester is the one who can tie the replies that come back to the request it
+// sent -- the same decision already taken for the auto-reply correlation id, and
+// for the same reason. A node inventing its own id would produce a number nobody
+// asked for and nobody can match.
+//
+// Reuses autoReplyMatchTrigger for the tail so the accepted id grammar is defined
+// once: whatever a node accepts in a request, it accepts in a trigger.
+static inline bool autoReplyParseTrigger(const char* command, const char* keyword,
+                                         const char** id, size_t* id_len) {
+  *id = NULL;
+  *id_len = 0;
+  if (command == NULL || keyword == NULL) return false;
+
+  static const char PREFIX[] = "trigger ";
+  const size_t plen = sizeof(PREFIX) - 1;
+  if (strncasecmp(command, PREFIX, plen) != 0) return false;
+
+  return autoReplyMatchTrigger(command + plen, keyword, id, id_len);
+}
+
+// Build the probe body: the keyword alone, or the keyword and the echoed id.
+//
+// This is the same text a person sends by hand, deliberately: the probe has to be
+// indistinguishable from an ordinary request, or the nodes that answer it would be
+// answering something else and the measurement would not compare.
+//
+// Returns the length written, or 0 if it would not fit.
+static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char* keyword,
+                                         const char* id, size_t id_len) {
+  if (out == NULL || out_size == 0 || keyword == NULL) return 0;
+  out[0] = 0;
+
+  size_t klen = strlen(keyword);
+  size_t need = klen + (id != NULL && id_len > 0 ? 1 + id_len : 0);
+  if (need == 0 || need + 1 > out_size) return 0;   // never truncate a probe
+
+  memcpy(out, keyword, klen);
+  size_t n = klen;
+  if (id != NULL && id_len > 0) {
+    out[n++] = ' ';
+    memcpy(out + n, id, id_len);
+    n += id_len;
+  }
+  out[n] = 0;
+  return n;
+}
+
+
 // Split a group text into its name prefix and message, and test the message against
 // the trigger keyword. Group texts are "<sender>: <message>" (see
 // BaseChatMesh::sendGroupMessage), and a text without that prefix is treated as all

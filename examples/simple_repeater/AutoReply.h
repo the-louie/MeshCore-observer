@@ -86,6 +86,25 @@ public:
   const char* replyRegion() const { return _region; }
 
   /**
+   * \brief  The derived '#test-<iata>' channel, for originating a probe on it.
+   *
+   * Readiness is only that the region is set and the channel derived. It is
+   * deliberately independent of 'autoreply on', which governs whether this node
+   * *answers* a request -- a node can be asked to originate a probe without
+   * answering probes itself, and conflating the two would make the second
+   * vantage point depend on a setting that has nothing to do with it.
+   *
+   * \param  iata  the node's region code, re-derives the channel when it changes
+   * \returns  true and fills 'out' when a channel exists
+   */
+  bool probeChannel(const char* iata, mesh::GroupChannel* out) {
+    refreshChannel(iata);
+    if (!_ready || out == NULL) return false;
+    *out = _channel;
+    return true;
+  }
+
+  /**
    * \brief  Match our channel, for Mesh::searchChannelsByHash()
    * \param  iata  the node's region code, re-derives the channel when it changes
    */

@@ -1037,6 +1037,63 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
   }
 }
 
+// Originate a probe on '#test-<iata>' -- the second vantage point this whole
+// sprint exists for. Every run so far has started at one node, so degree in the
+// derived graph is as much a fact about where we sit as about the mesh.
+//
+// The body is the same text a person sends by hand, so the nodes that answer it
+// are answering the same question they always answer and the measurements
+// compare. The channel is always derived from the region, never a literal: a
+// probe that went to a hardcoded channel would be measuring someone else's mesh.
+bool MyMesh::triggerProbe(const char* id, size_t id_len, char* reply) {
+  mesh::GroupChannel channel;
+  if (!auto_reply.probeChannel(autoReplyRegion(), &channel)) {
+    strcpy(reply, "Err - no region set, no channel to probe on");
+    return false;
+  }
+
+  char body[AUTOREPLY_MAX_PAYLOAD];
+  size_t body_len = autoReplyBuildProbe(body, sizeof(body), AUTOREPLY_KEYWORD, id, id_len);
+  if (body_len == 0) {
+    strcpy(reply, "Err - could not build probe");
+    return false;
+  }
+
+  // A group text is timestamp-prefixed like any other, so a probe looks on the
+  // wire exactly like the one a client sends.
+  uint8_t payload[AUTOREPLY_MAX_PAYLOAD];
+  uint32_t now = getRTCClock()->getCurrentTimeUnique();
+  memcpy(payload, &now, 4);
+  payload[4] = 0;                       // flags/attempt, as a client sends
+  memcpy(payload + 5, body, body_len);
+  size_t payload_len = 5 + body_len;
+
+  auto pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, payload, payload_len);
+  if (pkt == NULL) {
+    strcpy(reply, "Err - packet pool empty");
+    return false;
+  }
+
+  // Scoped to the configured region when there is one, un-scoped otherwise.
+  // Deliberately not the 'recv_pkt_region' fallback sendFloodReply uses: that
+  // member holds the scope of the last packet *received*, which for a probe
+  // originated from MQTT is unrelated to anything and would scope the probe to
+  // wherever the last traffic happened to come from.
+  TransportKey scope;
+  if (resolveAutoReplyScope(&scope)) {
+    sendFloodScoped(scope, pkt, (uint32_t)0, (uint8_t)1);
+  } else {
+    sendFlood(pkt, (uint32_t)0, (uint8_t)1);
+  }
+
+  if (id != NULL && id_len > 0) {
+    snprintf(reply, MQTTCTRL_MAX_REPLY, "OK - probe sent, id %.*s", (int)id_len, id);
+  } else {
+    strcpy(reply, "OK - probe sent");
+  }
+  return true;
+}
+
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
@@ -1624,6 +1681,8 @@ void MyMesh::buildStatsJson(char* buf, size_t buf_size) {
 #endif
 
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
+  const char* trigger_id = NULL;
+  size_t trigger_id_len = 0;
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
       region_map = temp_map;  // copy over the temp instance as new current map
@@ -1745,6 +1804,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 #endif
   } else if (auto_reply.handleCommand(autoReplyRegion(), command, reply)) {
     // reply already filled in
+  } else if (autoReplyParseTrigger(command, AUTOREPLY_KEYWORD, &trigger_id, &trigger_id_len)) {
+    triggerProbe(trigger_id, trigger_id_len, reply);
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

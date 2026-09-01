@@ -451,3 +451,97 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// ---- `trigger test` -----------------------------------------------------------
+//
+// The command a signed MQTT envelope carries to make this node originate a probe.
+// It had no handler at all: it was on the allowlist and classified as a transmit
+// command, so it verified, authorised, spent a trigger slot, persisted the replay
+// counter -- and then fell through to "Unknown command", sending nothing.
+
+TEST(TriggerCommand, BareFormIsAccepted) {
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test", "test", &id, &id_len));
+  EXPECT_EQ(NULL, id);
+  EXPECT_EQ(0u, id_len);
+}
+
+TEST(TriggerCommand, IdFormIsAcceptedAndEchoedNotGenerated) {
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test A1B2C3D4", "test", &id, &id_len));
+  ASSERT_TRUE(id != NULL);
+  EXPECT_EQ(std::string("A1B2C3D4"), std::string(id, id_len));
+}
+
+TEST(TriggerCommand, TheIdGrammarIsTheSameOneARequestUses) {
+  // Defined once, in autoReplyMatchTrigger: whatever a node accepts in a request
+  // it accepts in a trigger, so the two cannot drift into disagreeing.
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3", "test", &id, &id_len));    // 6
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3D4E", "test", &id, &id_len)); // 9
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test ZZZZZZZZ", "test", &id, &id_len));  // not hex
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3D4 x", "test", &id, &id_len));
+}
+
+TEST(TriggerCommand, IsCaseInsensitiveLikeTheKeywordItself) {
+  // The trigger word is documented case-insensitive, so the command that carries
+  // it is too -- a requester should not have to guess which half cares.
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_TRUE(autoReplyParseTrigger("TRIGGER TEST", "test", &id, &id_len));
+  EXPECT_TRUE(autoReplyParseTrigger("Trigger Test", "test", &id, &id_len));
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test a1b2c3d4", "test", &id, &id_len));
+  EXPECT_EQ(std::string("a1b2c3d4"), std::string(id, id_len));
+}
+
+TEST(TriggerCommand, RefusesAnythingThatIsNotATrigger) {
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParseTrigger("test", "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParseTrigger("triggertest", "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParseTrigger("trigger", "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParseTrigger("trigger other", "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParseTrigger(NULL, "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test", NULL, &id, &id_len));
+}
+
+TEST(TriggerCommand, ATriggeredProbeCannotItselfTriggerAProbe) {
+  // The probe body is bare `test`, and `trigger ` is required, so a probe this
+  // node originates can never be read back as a command to originate another.
+  char body[64];
+  size_t n = autoReplyBuildProbe(body, sizeof(body), "test", NULL, 0);
+  ASSERT_GT(n, 0u);
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParseTrigger(body, "test", &id, &id_len));
+}
+
+TEST(BuildProbe, BareAndIdForms) {
+  char out[64];
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, sizeof(out), "test", NULL, 0));
+  EXPECT_EQ(std::string("test"), std::string(out));
+
+  EXPECT_EQ(13u, autoReplyBuildProbe(out, sizeof(out), "test", "A1B2C3D4", 8));
+  EXPECT_EQ(std::string("test A1B2C3D4"), std::string(out));
+}
+
+TEST(BuildProbe, ProbeBodyIsExactlyWhatAPersonWouldSend) {
+  // A probe that differed from a hand-sent request would be answered by different
+  // nodes under different rules, and the two measurements would not compare.
+  char out[64];
+  autoReplyBuildProbe(out, sizeof(out), "test", "DEADBEEF", 8);
+
+  char text[128];
+  copyText(text, sizeof(text), (std::string("alice: ") + out).c_str());
+  AutoReplyRequest req = autoReplyParseRequest(text, "test");
+  EXPECT_TRUE(req.is_trigger);
+  ASSERT_TRUE(req.id != NULL);
+  EXPECT_EQ(std::string("DEADBEEF"), std::string(req.id, req.id_len));
+}
+
+TEST(BuildProbe, RefusesRatherThanTruncating) {
+  // A truncated probe would be a different message: `test A1B2` is not a request
+  // any node answers, so sending one would spend airtime for nothing.
+  char out[8];
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), "test", "A1B2C3D4", 8));
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, 4, "test", NULL, 0));   // no room for NUL
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, 5, "test", NULL, 0));   // exactly fits
+  EXPECT_EQ(0u, autoReplyBuildProbe(NULL, sizeof(out), "test", NULL, 0));
+}
