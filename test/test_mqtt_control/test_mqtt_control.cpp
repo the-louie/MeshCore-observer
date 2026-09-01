@@ -339,14 +339,50 @@ TEST(RateLimit, TriggersAreClassifiedApartFromParameterChanges) {
 }
 
 TEST(RateLimit, TransmitCommandsMustSatisfyBothBudgets) {
-  EXPECT_TRUE(mqttCtrlRateAccepted(true, true, true));
-  EXPECT_FALSE(mqttCtrlRateAccepted(true, true, false));   // trigger budget spent
-  EXPECT_FALSE(mqttCtrlRateAccepted(true, false, true));   // general budget spent
+  EXPECT_EQ(mqttCtrlRateResult(true, true, true), MQTTCTRL_OK);
+  EXPECT_EQ(mqttCtrlRateResult(true, true, false), MQTTCTRL_ERR_RATE_LIMITED);  // trigger spent
+  EXPECT_EQ(mqttCtrlRateResult(true, false, true), MQTTCTRL_ERR_RATE_LIMITED);  // general spent
 }
 
 TEST(RateLimit, ParameterChangesIgnoreTheTriggerBudget) {
-  EXPECT_TRUE(mqttCtrlRateAccepted(false, true, false));
-  EXPECT_FALSE(mqttCtrlRateAccepted(false, false, true));
+  EXPECT_EQ(mqttCtrlRateResult(false, true, false), MQTTCTRL_OK);
+  EXPECT_EQ(mqttCtrlRateResult(false, false, true), MQTTCTRL_ERR_RATE_LIMITED);
+}
+
+// ---- the two overloaded codes, now split -------------------------------------
+//
+// Both refusals used to borrow a code that already meant something else, so a
+// caller watching a public broker could not tell a forgery from a broken
+// publisher, nor "ask again later" from "never".
+
+TEST(ErrorCodes, ExhaustedBudgetIsNotTheSameAsUnauthorised) {
+  // NOT_ALLOWED means the command is not on the allowlist -- a permanent no.
+  // RATE_LIMITED means the budget is spent -- a temporary one. A caller that
+  // conflates them either retries forever or gives up on a command that works.
+  EXPECT_NE(MQTTCTRL_ERR_RATE_LIMITED, MQTTCTRL_ERR_NOT_ALLOWED);
+  EXPECT_EQ(mqttCtrlRateResult(true, false, false), MQTTCTRL_ERR_RATE_LIMITED);
+
+  MqttCtrlEnvelope env;
+  ASSERT_EQ(MQTTCTRL_OK, parse(envelope("v1|7|1788200000|set prv.key deadbeef"), &env));
+  EXPECT_EQ(MQTTCTRL_ERR_NOT_ALLOWED, mqttCtrlAuthorise(&env, 6, 1788199000));
+}
+
+TEST(ErrorCodes, AForgedSignatureIsNotTheSameAsAMalformedOne) {
+  // BAD_SIG_HEX is still produced at parse time for a field that is not 128 hex
+  // characters; SIG_INVALID is reserved for one that parsed and did not verify.
+  MqttCtrlEnvelope env;
+  EXPECT_EQ(MQTTCTRL_ERR_BAD_SIG_LEN, parse("v1|7|1788200000|get txdelay|zzzz", &env));
+  EXPECT_EQ(MQTTCTRL_ERR_BAD_SIG_HEX,
+            parse("v1|7|1788200000|get txdelay|" + sig('z'), &env));
+  EXPECT_NE(MQTTCTRL_ERR_SIG_INVALID, MQTTCTRL_ERR_BAD_SIG_HEX);
+}
+
+TEST(ErrorCodes, TheNewCodesAreAppendedAndNothingShifted) {
+  EXPECT_EQ((int)MQTTCTRL_ERR_BAD_SIG_HEX, 5);
+  EXPECT_EQ((int)MQTTCTRL_ERR_NOT_ALLOWED, 14);
+  EXPECT_EQ((int)MQTTCTRL_ERR_NO_OWNER_KEY, 15);
+  EXPECT_EQ((int)MQTTCTRL_ERR_SIG_INVALID, 16);
+  EXPECT_EQ((int)MQTTCTRL_ERR_RATE_LIMITED, 17);
 }
 
 TEST(RateLimit, TriggerCapIsTighterThanTheGeneralCap) {

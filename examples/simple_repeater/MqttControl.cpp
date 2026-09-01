@@ -144,7 +144,7 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
       break;
     }
     if (!owner.verify(env.signature, signed_bytes, signed_len)) {
-      result = MQTTCTRL_ERR_BAD_SIG_HEX;
+      result = MQTTCTRL_ERR_SIG_INVALID;   // parsed as hex, did not verify
       break;
     }
 
@@ -155,11 +155,9 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
     // every stateless check: otherwise anyone could drain the budget with garbage
     // that was going to be refused anyway.
     bool transmit = mqttCtrlIsTransmitCommand(env.command, env.command_len);
-    if (!mqttCtrlRateAccepted(transmit, _commands.allow(now),
-                              transmit ? _transmits.allow(now) : true)) {
-      result = MQTTCTRL_ERR_NOT_ALLOWED;
-      break;
-    }
+    result = mqttCtrlRateResult(transmit, _commands.allow(now),
+                                transmit ? _transmits.allow(now) : true);
+    if (result != MQTTCTRL_OK) break;
 
     // Persisted before the command runs, never after. A counter written afterwards
     // is reopened by whatever crashes mid-command, and a silently repeated

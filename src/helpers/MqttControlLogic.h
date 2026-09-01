@@ -77,6 +77,16 @@ enum MqttCtrlResult {
   // read these as numbers, so an inserted value would silently re-label every
   // stored result.
   MQTTCTRL_ERR_NO_OWNER_KEY,
+  // A signature that parsed as hex but did not verify. Distinct from
+  // MQTTCTRL_ERR_BAD_SIG_HEX, which means the field was malformed: one is a
+  // forgery or the wrong key, the other is a broken publisher, and a caller
+  // watching a public broker wants to tell those apart.
+  MQTTCTRL_ERR_SIG_INVALID,
+  // Budget exhausted. Distinct from MQTTCTRL_ERR_NOT_ALLOWED, which means the
+  // command is not on the allowlist: one is "ask again later", the other is
+  // "never". Reporting both as NOT_ALLOWED made a throttled node look like a
+  // node refusing the command outright.
+  MQTTCTRL_ERR_RATE_LIMITED,
 };
 
 // Can a staged command be examined at all?
@@ -336,8 +346,14 @@ static inline MqttCtrlResult mqttCtrlAuthorise(const MqttCtrlEnvelope* env,
 //
 // 'allow_general' and 'allow_transmit' are the results of RateLimiter::allow on
 // the caller's two limiters; a transmit command must satisfy both.
-static inline bool mqttCtrlRateAccepted(bool is_transmit, bool allow_general,
-                                        bool allow_transmit) {
-  if (!allow_general) return false;
-  return is_transmit ? allow_transmit : true;
+//
+// Returns a result rather than a bool so the refusal carries its own code. The
+// name changed with the return type on purpose: the old bool was read as
+// `if (!mqttCtrlRateAccepted(...))`, and MQTTCTRL_OK is 0, so a same-named
+// function returning an enum would have inverted every call site in silence.
+static inline MqttCtrlResult mqttCtrlRateResult(bool is_transmit, bool allow_general,
+                                                bool allow_transmit) {
+  if (!allow_general) return MQTTCTRL_ERR_RATE_LIMITED;
+  if (is_transmit && !allow_transmit) return MQTTCTRL_ERR_RATE_LIMITED;
+  return MQTTCTRL_OK;
 }
