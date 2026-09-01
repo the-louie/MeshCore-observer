@@ -425,6 +425,26 @@ static inline MqttCtrlResult mqttCtrlTransmitTopicResult(bool is_transmit, const
   return MQTTCTRL_OK;
 }
 
+// The sender_timestamp an MQTT command executes with. **Never 0.**
+//
+// Zero is not a clock reading in this CLI, it is a privilege marker: it means the
+// caller is physically present (serial, ethernet, the web portal), and it is what
+// gates `get prv.key`, `set prv.key`, `set mqtt.owner` and `erase`. A remote
+// command that reached the CLI with 0 would be handed exactly the privilege those
+// gates exist to withhold.
+//
+// The dangerous case is not the ordinary one. A node whose clock has never synced
+// reports 0, so the naive `runCommand(now, ...)` grants full local privilege to a
+// remote caller precisely when NTP is down -- an outage becomes a privilege
+// escalation. Mapping 0 to 1 costs a second of accuracy and removes that entirely.
+//
+// Lives here rather than as a static in MqttControl.cpp so it can be tested: this
+// is the single line that keeps every privilege gate in CommonCLI meaningful
+// against MQTT, and it was previously unreachable from any test.
+static inline uint32_t mqttCtrlSenderStamp(uint32_t now) {
+  return now == 0 ? 1 : now;
+}
+
 // Rate limiting, as a decision the caller makes with limiters it owns. Split out
 // rather than folded into mqttCtrlAuthorise because the limiters are stateful and
 // consume budget when asked -- so the caller must run every stateless check

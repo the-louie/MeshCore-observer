@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <string>
 #include "helpers/MqttControlLogic.h"
+#include "helpers/AutoReplyLogic.h"   // the trigger form is checked one layer down
 
 extern "C" {
 #include "ed25519/ed_25519.h"
@@ -799,4 +800,80 @@ TEST(GoldenRead, TheSameReadIsRefusedAtAnotherNode) {
   uint8_t pub[32];
   hexToBytes(READ_PUB, pub, sizeof(pub));
   EXPECT_EQ(0, ed25519_verify(env.signature, signed_bytes, signed_len, pub));
+}
+
+// ---- the private key is not reachable over MQTT -------------------------------
+//
+// Operator requirement, 2026-09-01: the node's identity key must be neither
+// readable nor writable over MQTT. Two independent guards enforce it, and each is
+// pinned separately here -- the point of having two is that either alone suffices,
+// so a test that only proves their conjunction would not notice one of them dying.
+
+TEST(PrivateKey, GuardOne_AnMqttCommandNeverCarriesTheLocalPrivilegeMarker) {
+  // sender_timestamp 0 is not a clock reading, it is "the caller is physically
+  // present". It gates get/set prv.key, set mqtt.owner and erase in CommonCLI.
+  // If an MQTT command could execute with 0, every one of those gates would open.
+  EXPECT_NE(0u, mqttCtrlSenderStamp(0));
+
+  // The case that matters: a node whose clock has never synced reports 0, so
+  // passing `now` through unchanged would hand a remote caller full local
+  // privilege exactly when NTP is down -- an outage becoming an escalation.
+  EXPECT_EQ(1u, mqttCtrlSenderStamp(0));
+
+  // Every real reading is passed through untouched.
+  EXPECT_EQ(1u, mqttCtrlSenderStamp(1));
+  EXPECT_EQ(1788000600u, mqttCtrlSenderStamp(1788000600));
+  EXPECT_EQ(0xFFFFFFFFu, mqttCtrlSenderStamp(0xFFFFFFFFu));
+}
+
+TEST(PrivateKey, GuardTwo_NeitherReadingNorWritingItIsOnTheAllowlist) {
+  EXPECT_FALSE(allowed("get prv.key"));
+  EXPECT_FALSE(allowed("set prv.key 00112233"));
+
+  // And not by any spelling the boundary rule might let through.
+  EXPECT_FALSE(allowed("GET PRV.KEY"));
+  EXPECT_FALSE(allowed("SET PRV.KEY 00112233"));
+  EXPECT_FALSE(allowed("get prv"));
+  EXPECT_FALSE(allowed("set prv.key"));
+  EXPECT_FALSE(allowed("get prv.keyx"));
+
+  // Nor smuggled in behind a command that is allowed.
+  EXPECT_FALSE(allowed("get autoreply; get prv.key"));
+}
+
+TEST(PrivateKey, ATrailingKeyCommandRidesThroughTheAllowlistAndDiesAtTheHandler) {
+  // Worth stating exactly, because the obvious guess is wrong and I guessed it:
+  // the allowlist admits `trigger test set prv.key 00`. Entries match as prefixes
+  // with a boundary, so anything beginning "trigger test " is admitted -- the same
+  // way "set autoreply" admits "set autoreply.hops 8". The allowlist decides which
+  // *family* of command may arrive, not whether one is well formed.
+  EXPECT_TRUE(allowed("trigger test set prv.key 00"));
+
+  // The form is checked one layer down, and that is what refuses it: the trigger
+  // parser accepts a bare keyword or a keyword and eight hex characters, nothing
+  // else. So the string reaches no handler that would act on the tail.
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test set prv.key 00", "test", &id, &id_len));
+
+  // It is not a `set` to any CLI either -- it begins "trigger", so CommonCLI's
+  // handleSetCmd is never reached and the whole string falls through as unknown.
+  EXPECT_NE(0, memcmp("trigger test set prv.key 00", "set ", 4));
+
+  // Residual, recorded rather than fixed: it is classed as a transmit and so
+  // spends a trigger token before being refused. Not an escalation -- sending it
+  // at all requires the owner key, and whoever holds that can trigger legitimately
+  // -- but it is why the allowlist is not the only thing standing here.
+  EXPECT_TRUE(mqttCtrlIsTransmitCommand("trigger test set prv.key 00", 26));
+}
+
+TEST(PrivateKey, ASignedRequestForItIsRefusedAtAuthorisation) {
+  // End of the chain: even a perfectly signed, fresh, unexpired envelope asking
+  // for the key is refused -- and refused as NOT_ALLOWED, which is permanent,
+  // rather than as anything a requester should retry.
+  MqttCtrlEnvelope env;
+  ASSERT_EQ(MQTTCTRL_OK, parse(envelope("v1|9|1788200000|get prv.key"), &env));
+  EXPECT_EQ(MQTTCTRL_ERR_NOT_ALLOWED, mqttCtrlAuthorise(&env, 8, 1788199000));
+
+  ASSERT_EQ(MQTTCTRL_OK, parse(envelope("v1|9|1788200000|set prv.key deadbeef"), &env));
+  EXPECT_EQ(MQTTCTRL_ERR_NOT_ALLOWED, mqttCtrlAuthorise(&env, 8, 1788199000));
 }

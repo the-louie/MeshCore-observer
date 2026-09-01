@@ -34,10 +34,6 @@ static File openWrite(FILESYSTEM* fs, const char* filename) {
 // physical or password authentication as their boundary. A remote caller has
 // neither, so it must never present itself as local. The allowlist in
 // MqttControlLogic.h is the independent second guard on the same door.
-static uint32_t senderStamp(uint32_t now) {
-  return now == 0 ? 1 : now;
-}
-
 MqttControl::MqttControl()
   : _fs(NULL), _enabled(false), _counter(0),
     _commands(MQTTCTRL_CMD_MAX, MQTTCTRL_CMD_WINDOW_SECS),
@@ -187,7 +183,7 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
     memcpy(command, env.command, env.command_len);
     command[env.command_len] = 0;
     if (runner != NULL) {
-      runner->runCommand(senderStamp(now), command, reply);
+      runner->runCommand(mqttCtrlSenderStamp(now), command, reply);
     }
   } while (false);
 

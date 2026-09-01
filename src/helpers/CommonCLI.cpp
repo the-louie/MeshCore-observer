@@ -1195,7 +1195,13 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     StrHelper::strncpy(_prefs->guest_password, &config[15], sizeof(_prefs->guest_password));
     savePrefs();
     strcpy(reply, "OK");
-  } else if (memcmp(config, "prv.key ", 8) == 0) {
+  } else if (sender_timestamp == 0 && memcmp(config, "prv.key ", 8) == 0) {
+    // Serial command line only, matching `get prv.key` below and `erase` above.
+    // This overwrites the node's identity: its public key changes, so after a
+    // reboot it is a different node -- gone from every contact list and from the
+    // advert history, and not recoverable without physical access. The read was
+    // already gated and the write was not, which had it backwards: the key could
+    // not be exfiltrated remotely but could be destroyed remotely.
     uint8_t prv_key[PRV_KEY_SIZE];
     bool success = mesh::Utils::fromHex(prv_key, PRV_KEY_SIZE, &config[8]);
     // only allow rekey if key is valid
