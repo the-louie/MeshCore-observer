@@ -1053,7 +1053,8 @@ bool MyMesh::triggerProbe(const char* id, size_t id_len, char* reply) {
   }
 
   char body[AUTOREPLY_MAX_PAYLOAD];
-  size_t body_len = autoReplyBuildProbe(body, sizeof(body), AUTOREPLY_KEYWORD, id, id_len);
+  size_t body_len = autoReplyBuildProbe(body, sizeof(body), _prefs.node_name,
+                                        AUTOREPLY_KEYWORD, id, id_len);
   if (body_len == 0) {
     strcpy(reply, "Err - could not build probe");
     return false;

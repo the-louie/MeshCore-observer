@@ -161,17 +161,35 @@ static inline bool autoReplyParseTrigger(const char* command, const char* keywor
 // answering something else and the measurement would not compare.
 //
 // Returns the length written, or 0 if it would not fit.
-static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char* keyword,
-                                         const char* id, size_t id_len) {
+static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char* sender,
+                                         const char* keyword, const char* id, size_t id_len) {
   if (out == NULL || out_size == 0 || keyword == NULL) return 0;
   out[0] = 0;
 
+  // The sender prefix is not decoration. autoReplyParseRequest splits the text at
+  // ": " to find who asked, and a repeater echoes that name back inside the
+  // reply's [brackets]. Without it every reply to this probe comes back
+  // anonymous, and a reply that cannot name the node it answers is worth much
+  // less than one that can -- with two probes in flight nothing tells them apart.
+  //
+  // Measured on air 2026-09-01: a triggered probe sent as bare `test` drew
+  // `SNR 7.75 RSSI -106 1h 70` where a client's probe draws
+  // `[SE-JKG-LouHome-A] SNR ...`. The probe has to look like the one a person
+  // sends, prefix included, or it is not measuring the same thing.
+  size_t slen = (sender != NULL && sender[0] != 0) ? strlen(sender) : 0;
   size_t klen = strlen(keyword);
-  size_t need = klen + (id != NULL && id_len > 0 ? 1 + id_len : 0);
+  size_t need = (slen ? slen + 2 : 0) + klen + (id != NULL && id_len > 0 ? 1 + id_len : 0);
   if (need == 0 || need + 1 > out_size) return 0;   // never truncate a probe
 
-  memcpy(out, keyword, klen);
-  size_t n = klen;
+  size_t n = 0;
+  if (slen) {
+    memcpy(out, sender, slen);
+    n = slen;
+    out[n++] = ':';
+    out[n++] = ' ';
+  }
+  memcpy(out + n, keyword, klen);
+  n += klen;
   if (id != NULL && id_len > 0) {
     out[n++] = ' ';
     memcpy(out + n, id, id_len);

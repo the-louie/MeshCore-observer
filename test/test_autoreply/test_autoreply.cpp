@@ -507,7 +507,7 @@ TEST(TriggerCommand, ATriggeredProbeCannotItselfTriggerAProbe) {
   // The probe body is bare `test`, and `trigger ` is required, so a probe this
   // node originates can never be read back as a command to originate another.
   char body[64];
-  size_t n = autoReplyBuildProbe(body, sizeof(body), "test", NULL, 0);
+  size_t n = autoReplyBuildProbe(body, sizeof(body), NULL, "test", NULL, 0);
   ASSERT_GT(n, 0u);
   const char* id = NULL; size_t id_len = 0;
   EXPECT_FALSE(autoReplyParseTrigger(body, "test", &id, &id_len));
@@ -515,10 +515,10 @@ TEST(TriggerCommand, ATriggeredProbeCannotItselfTriggerAProbe) {
 
 TEST(BuildProbe, BareAndIdForms) {
   char out[64];
-  EXPECT_EQ(4u, autoReplyBuildProbe(out, sizeof(out), "test", NULL, 0));
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0));
   EXPECT_EQ(std::string("test"), std::string(out));
 
-  EXPECT_EQ(13u, autoReplyBuildProbe(out, sizeof(out), "test", "A1B2C3D4", 8));
+  EXPECT_EQ(13u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8));
   EXPECT_EQ(std::string("test A1B2C3D4"), std::string(out));
 }
 
@@ -526,7 +526,7 @@ TEST(BuildProbe, ProbeBodyIsExactlyWhatAPersonWouldSend) {
   // A probe that differed from a hand-sent request would be answered by different
   // nodes under different rules, and the two measurements would not compare.
   char out[64];
-  autoReplyBuildProbe(out, sizeof(out), "test", "DEADBEEF", 8);
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", "DEADBEEF", 8);
 
   char text[128];
   copyText(text, sizeof(text), (std::string("alice: ") + out).c_str());
@@ -540,8 +540,61 @@ TEST(BuildProbe, RefusesRatherThanTruncating) {
   // A truncated probe would be a different message: `test A1B2` is not a request
   // any node answers, so sending one would spend airtime for nothing.
   char out[8];
-  EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), "test", "A1B2C3D4", 8));
-  EXPECT_EQ(0u, autoReplyBuildProbe(out, 4, "test", NULL, 0));   // no room for NUL
-  EXPECT_EQ(4u, autoReplyBuildProbe(out, 5, "test", NULL, 0));   // exactly fits
-  EXPECT_EQ(0u, autoReplyBuildProbe(NULL, sizeof(out), "test", NULL, 0));
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8));
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, 4, NULL, "test", NULL, 0));   // no room for NUL
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, 5, NULL, "test", NULL, 0));   // exactly fits
+  EXPECT_EQ(0u, autoReplyBuildProbe(NULL, sizeof(out), NULL, "test", NULL, 0));
+}
+
+// ---- the probe carries the sender's name -------------------------------------
+//
+// Found on air, not in a test: a triggered probe sent as bare `test` drew replies
+// reading `SNR 7.75 RSSI -106 1h 70`, where a client's probe draws
+// `[SE-JKG-LouHome-A] SNR ...`. autoReplyParseRequest splits at ": " to find the
+// requester, and a repeater echoes that name into its reply. Without the prefix
+// the second vantage's replies are anonymous, and with two probes in flight
+// nothing distinguishes them.
+
+TEST(BuildProbe, CarriesTheSenderSoRepliesCanNameIt) {
+  char out[96];
+  size_t n = autoReplyBuildProbe(out, sizeof(out), "SE-JKG-LOUTEST", "test", NULL, 0);
+  EXPECT_EQ(std::string("SE-JKG-LOUTEST: test"), std::string(out));
+  EXPECT_EQ(n, strlen(out));
+}
+
+TEST(BuildProbe, CarriesBothSenderAndId) {
+  char out[96];
+  autoReplyBuildProbe(out, sizeof(out), "SE-JKG-LOUTEST", "test", "A1B2C3D4", 8);
+  EXPECT_EQ(std::string("SE-JKG-LOUTEST: test A1B2C3D4"), std::string(out));
+}
+
+TEST(BuildProbe, ARealRepeaterCanParseWhatWeSend) {
+  // The round trip that matters: what we build must come back out of the parser
+  // as a trigger, with the sender and id intact.
+  char out[96];
+  autoReplyBuildProbe(out, sizeof(out), "SE-JKG-LOUTEST", "test", "DEADBEEF", 8);
+
+  char text[128];
+  copyText(text, sizeof(text), out);
+  AutoReplyRequest req = autoReplyParseRequest(text, "test");
+  EXPECT_TRUE(req.is_trigger);
+  EXPECT_EQ(std::string("SE-JKG-LOUTEST"), std::string(req.sender, req.sender_len));
+  ASSERT_TRUE(req.id != NULL);
+  EXPECT_EQ(std::string("DEADBEEF"), std::string(req.id, req.id_len));
+}
+
+TEST(BuildProbe, AnUnnamedNodeStillSendsAUsableProbe) {
+  // A node with no name set must still be able to probe; it just cannot be named
+  // in the replies. Silence would be worse than anonymity.
+  char out[96];
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, sizeof(out), "", "test", NULL, 0));
+  EXPECT_EQ(std::string("test"), std::string(out));
+  EXPECT_EQ(4u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0));
+}
+
+TEST(BuildProbe, RefusesRatherThanTruncatingAName) {
+  // A truncated name would be attributed to the wrong node, which is worse than
+  // no probe at all.
+  char out[16];
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), "SE-JKG-LOUTEST", "test", "A1B2C3D4", 8));
 }
