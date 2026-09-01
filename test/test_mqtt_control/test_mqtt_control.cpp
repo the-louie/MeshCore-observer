@@ -9,6 +9,8 @@
 // The design is docs/architecture/decisions/001-mqtt-control-envelope.md in the
 // workspace root, which is the directory above this repo, not a path inside it.
 #include <gtest/gtest.h>
+
+#include <algorithm>
 #include <string>
 #include "helpers/MqttControlLogic.h"
 
@@ -386,6 +388,17 @@ TEST(ErrorCodes, TheNewCodesAreAppendedAndNothingShifted) {
   EXPECT_EQ((int)MQTTCTRL_ERR_RATE_LIMITED, 17);
 }
 
+TEST(ErrorCodes, TheCodesDocumentedInMqttControlMdKeepTheirNumbers) {
+  // docs/mqtt-control.md publishes these numbers for a requester to parse, and
+  // a stored result keeps its meaning only while they hold. Counting them by
+  // hand got the table wrong once already.
+  EXPECT_EQ((int)MQTTCTRL_OK, 0);
+  EXPECT_EQ((int)MQTTCTRL_ERR_REPLAY, 9);
+  EXPECT_EQ((int)MQTTCTRL_ERR_EXPIRED, 10);
+  EXPECT_EQ((int)MQTTCTRL_ERR_FUTURE, 11);
+  EXPECT_EQ((int)MQTTCTRL_ERR_NO_CLOCK, 12);
+}
+
 TEST(RateLimit, TriggerCapIsTighterThanTheGeneralCap) {
   // The constants themselves are the defence: a leaked key bounded only by the
   // general cap could still put 20 floods an hour on a shared network.
@@ -508,4 +521,78 @@ TEST(OwnerReady, ExistingCodesKeepTheirNumbers) {
   EXPECT_EQ((int)MQTTCTRL_ERR_EMPTY, 1);
   EXPECT_EQ((int)MQTTCTRL_ERR_NOT_ALLOWED, 14);
   EXPECT_EQ((int)MQTTCTRL_ERR_NO_OWNER_KEY, 15);
+}
+
+// ---- the published result -----------------------------------------------------
+//
+// The topic names the node; the counter names the question. Without it a `get`
+// answer is "> 0.5" -- true of whatever was asked, which is not enough to act on
+// when one requester is polling several nodes.
+
+TEST(FormatResult, CarriesCounterCodeCommandAndReply) {
+  char out[MQTTCTRL_MAX_RESULT];
+  size_t n = mqttCtrlFormatResult(out, sizeof(out), 42, 0, "get txdelay", "> 0.5");
+  EXPECT_EQ(std::string("r1|42|0|get txdelay|> 0.5"), std::string(out));
+  EXPECT_EQ(n, strlen(out));
+}
+
+TEST(FormatResult, ARefusalStillNamesItsRequest) {
+  // No command ran, so the reply is empty -- but the counter and the code are
+  // what make a refusal distinguishable from a node that never answered.
+  char out[MQTTCTRL_MAX_RESULT];
+  mqttCtrlFormatResult(out, sizeof(out), 9, (int)MQTTCTRL_ERR_RATE_LIMITED,
+                       "trigger test", "");
+  EXPECT_EQ(std::string("r1|9|17|trigger test|"), std::string(out));
+}
+
+TEST(FormatResult, TruncatesRatherThanDiscarding) {
+  // The existing payload builders drop a payload over budget rather than
+  // shortening it, which would mean the longest replies never arrive. Here the
+  // reply is last and every earlier field is bounded, so a clamp leaves a line
+  // that still parses.
+  std::string huge(400, 'x');
+  char out[64];
+  size_t n = mqttCtrlFormatResult(out, sizeof(out), 7, 0, "get radio", huge.c_str());
+  EXPECT_EQ(n, sizeof(out) - 1);
+  EXPECT_EQ(strlen(out), sizeof(out) - 1);
+  EXPECT_EQ(std::string("r1|7|0|get radio|"), std::string(out).substr(0, 17));
+}
+
+TEST(FormatResult, TheFieldsBeforeTheReplyCannotBeAmbiguous) {
+  // mqttCtrlCommandCharsOk refuses a command containing the separator, so only
+  // the trailing reply can hold one and a parser takes the rest of the line.
+  EXPECT_FALSE(mqttCtrlCommandCharsOk("get a|b", 7));
+
+  char out[MQTTCTRL_MAX_RESULT];
+  mqttCtrlFormatResult(out, sizeof(out), 1, 0, "get radio", "a|b|c");
+  std::string s(out);
+  EXPECT_EQ(std::string("r1|1|0|get radio|a|b|c"), s);
+
+  // Split on the first four separators; whatever follows is the reply, however
+  // many separators it happens to contain.
+  size_t pos = 0;
+  for (int i = 0; i < 4; i++) pos = s.find('|', pos) + 1;
+  EXPECT_EQ(std::string("a|b|c"), s.substr(pos));
+  EXPECT_EQ(std::string("get radio"), s.substr(7, pos - 8));
+}
+
+TEST(FormatResult, RefusesABufferItCannotUse) {
+  char out[8];
+  EXPECT_EQ(0u, mqttCtrlFormatResult(NULL, sizeof(out), 1, 0, "x", "y"));
+  EXPECT_EQ(0u, mqttCtrlFormatResult(out, 0, 1, 0, "x", "y"));
+}
+
+TEST(FormatResult, ANullCommandOrReplyIsAnEmptyField) {
+  char out[MQTTCTRL_MAX_RESULT];
+  mqttCtrlFormatResult(out, sizeof(out), 3, 0, NULL, NULL);
+  EXPECT_EQ(std::string("r1|3|0||"), std::string(out));
+}
+
+TEST(FormatResult, TheBufferFitsTheLongestPossibleLine) {
+  std::string cmd(MQTTCTRL_MAX_COMMAND, 'c');
+  std::string rep(MQTTCTRL_MAX_REPLY - 1, 'r');
+  char out[MQTTCTRL_MAX_RESULT];
+  size_t n = mqttCtrlFormatResult(out, sizeof(out), 4294967295u, 17,
+                                  cmd.c_str(), rep.c_str());
+  EXPECT_LT(n, sizeof(out) - 1) << "MQTTCTRL_MAX_RESULT must not clamp a legal line";
 }

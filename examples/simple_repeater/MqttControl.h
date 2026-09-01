@@ -41,6 +41,17 @@ struct MqttCommandRunner {
  *
  * Off unless 'set mqtt.cmd on', and inert regardless without an owner key.
  */
+// What drain() reports back so the caller can publish a result that names the
+// request it answers. The counter is the correlation id: strictly increasing,
+// persisted per node, and chosen by the requester.
+struct MqttCtrlOutcome {
+  bool authentic;                            // signature verified; safe to publish
+  uint32_t counter;                          // the request's counter
+  char command[MQTTCTRL_MAX_COMMAND + 1];    // echoed back, NUL-terminated
+
+  MqttCtrlOutcome() : authentic(false), counter(0) { command[0] = 0; }
+};
+
 class MqttControl {
   FILESYSTEM* _fs;
   bool _enabled;
@@ -80,8 +91,9 @@ public:
   // it through 'mesh' if it passes, writing a human-readable outcome into 'reply'
   // (at least 160 bytes, the CLI's own budget). Returns the verdict either way, so
   // the caller can publish a refusal without having to guess why.
-  // 'authentic', when given, is set true the moment the signature verifies and
-  // stays false otherwise. It is what decides whether a result may be published:
+  // 'out', when given, carries what the caller needs to publish an attributable
+  // result: whether the signature verified, and the counter and command it
+  // vouched for. 'authentic' decides whether a result may be published:
   // verification happens before the rate limiter (deliberately -- the limiters
   // spend budget when asked, so every stateless check runs first), which means a
   // bad-signature refusal is not rate limited. Publishing those would let anyone
@@ -91,7 +103,7 @@ public:
   // the wrong half.
   MqttCtrlResult drain(const mesh::Identity& owner, uint32_t now,
                        MqttCommandRunner* runner, char* reply, size_t reply_size,
-                       bool* authentic = NULL);
+                       MqttCtrlOutcome* out = NULL);
 
   bool handleCommand(const char* command, char* reply);
 };

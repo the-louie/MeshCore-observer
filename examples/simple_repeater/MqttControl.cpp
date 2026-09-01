@@ -122,9 +122,9 @@ void MqttControl::stage(const char* topic, const uint8_t* payload, size_t len) {
 
 MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
                                   MqttCommandRunner* runner, char* reply, size_t reply_size,
-                                  bool* authentic) {
+                                  MqttCtrlOutcome* out) {
   if (reply != NULL && reply_size > 0) reply[0] = 0;
-  if (authentic != NULL) *authentic = false;
+  if (out != NULL) { out->authentic = false; out->counter = 0; out->command[0] = 0; }
   if (!_staged.pending) return MQTTCTRL_OK;
 
   MqttCtrlResult result = MQTTCTRL_OK;
@@ -150,8 +150,15 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
       break;
     }
     // Past this line the sender held the owner key, so the outcome is safe to
-    // publish however it turns out.
-    if (authentic != NULL) *authentic = true;
+    // publish however it turns out -- and the counter and command it signed are
+    // what let the requester tell which question the answer belongs to.
+    if (out != NULL) {
+      out->authentic = true;
+      out->counter = env.counter;
+      size_t n = env.command_len < MQTTCTRL_MAX_COMMAND ? env.command_len : MQTTCTRL_MAX_COMMAND;
+      memcpy(out->command, env.command, n);
+      out->command[n] = 0;
+    }
 
     result = mqttCtrlAuthorise(&env, _counter, now);
     if (result != MQTTCTRL_OK) break;

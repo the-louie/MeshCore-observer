@@ -127,7 +127,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks
   const char* _ctrl_topics[2];
   void setupMqttControl(MQTTBridge* bridge);
   void loopMqttControl();
-  void publishMqttControlResult(MqttCtrlResult result, const char* reply);
+  void publishMqttControlResult(MqttCtrlResult result, const MqttCtrlOutcome& outcome,
+                                const char* reply);
 public:
   void onControlMessage(const char* topic, const uint8_t* payload, size_t len) override {
     mqtt_control.stage(topic, payload, len);

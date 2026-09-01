@@ -95,3 +95,40 @@ Either alone should be enough; both together mean one of them can be wrong.
   consequence; it cannot make the broker quiet.
 - **A compromised owner key.** Whoever holds it can do anything on the allowlist. Rotation
   currently needs serial access.
+
+## The result
+
+A node that verified a command publishes the outcome to its own result topic:
+
+```
+meshcore/{IATA}/{PUBKEY}/res
+r1|<counter>|<code>|<command>|<reply>
+```
+
+The counter is the one the requester chose, which makes it the correlation id: the topic says
+which node answered, the counter says which question it answered. Split on the first four
+separators and take the remainder as the reply — a command can never contain a separator
+(`mqttCtrlCommandCharsOk` refuses it), so only the reply can, and only at the end.
+
+A line too long for the buffer is **truncated, never dropped**. The reply is last and every
+earlier field is bounded, so a clamped line still parses.
+
+**Only an outcome whose signature verified is published.** Verification runs before the rate
+limiter — the limiters spend budget when asked, so every stateless check comes first — which
+means a bad-signature refusal is not rate limited, and publishing those would let anyone on a
+broker with public credentials drive unlimited publishes out of the node. A legitimate
+requester holds the owner key, so its commands always draw an answer whether they succeed or
+are refused; nothing readable is lost.
+
+| Code | Meaning |
+|---|---|
+| 0 | ran; `reply` holds the output |
+| 9 | replayed — counter not greater than the last one stored |
+| 10 | expired |
+| 11 | expiry too far in the future |
+| 12 | no trusted clock; expiry fails closed |
+| 14 | not on the allowlist — a permanent no |
+| 17 | rate limited — ask again later |
+
+Codes are appended to the enum and never renumbered, so a stored result keeps its meaning.
+

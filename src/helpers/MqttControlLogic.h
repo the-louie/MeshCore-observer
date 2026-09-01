@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include <strings.h>
 
 #include "MQTTObserverValidation.h"   // mqttOwnerKeyValid
@@ -39,6 +40,9 @@
 #define MQTTCTRL_MAX_PAYLOAD    512
 #define MQTTCTRL_MAX_TOPIC      160
 #define MQTTCTRL_MAX_COMMAND    160
+#define MQTTCTRL_MAX_REPLY      160
+// r1|counter|code|command|reply, plus the separators and a terminator.
+#define MQTTCTRL_MAX_RESULT     (2 + 12 + 6 + MQTTCTRL_MAX_COMMAND + MQTTCTRL_MAX_REPLY + 8)
 #define MQTTCTRL_MAX_SIGNED     (MQTTCTRL_MAX_TOPIC + 1 + MQTTCTRL_MAX_PAYLOAD)
 
 // A command may not claim to be valid indefinitely: a signer cannot mint one that
@@ -337,6 +341,40 @@ static inline MqttCtrlResult mqttCtrlAuthorise(const MqttCtrlEnvelope* env,
 
   if (!mqttCtrlCommandAllowed(env->command, env->command_len)) return MQTTCTRL_ERR_NOT_ALLOWED;
   return MQTTCTRL_OK;
+}
+
+// The published result: `r1|<counter>|<code>|<command>|<reply>`.
+//
+// A `get` reply on its own is "> 0.5" -- true of whatever was asked, which with
+// one requester polling several nodes is not enough to act on. The topic names
+// the node, so what is missing is the question. The counter answers it: it is
+// already persisted per node, already strictly increasing, and already what the
+// requester chose, which makes it the natural correlation id -- the same role the
+// 8-hex id plays on the auto-reply path.
+//
+// Flat rather than JSON, and clamped rather than discarded. The existing payload
+// builders have a hard 768-byte budget and *drop* a payload that exceeds it
+// (MQTTPayloadBuilder.cpp:9-21); inheriting that would mean the longest replies --
+// the interesting ones -- silently never arrive. Truncation here yields a shorter
+// line that still parses, because the reply is last and every earlier field is
+// bounded.
+//
+// Splitting on the separator is unambiguous: mqttCtrlCommandCharsOk refuses a
+// command containing one, so only the trailing reply can, and a parser takes the
+// remainder of the line as the reply rather than splitting it further.
+//
+// Returns the number of bytes written, never more than out_size - 1.
+static inline size_t mqttCtrlFormatResult(char* out, size_t out_size, uint32_t counter,
+                                          int code, const char* command, const char* reply) {
+  if (out == NULL || out_size == 0) return 0;
+  out[0] = 0;
+  int n = snprintf(out, out_size, "r1%c%u%c%d%c%s%c%s",
+                   MQTTCTRL_FIELD_SEP, (unsigned)counter,
+                   MQTTCTRL_FIELD_SEP, code,
+                   MQTTCTRL_FIELD_SEP, command != NULL ? command : "",
+                   MQTTCTRL_FIELD_SEP, reply != NULL ? reply : "");
+  if (n < 0) { out[0] = 0; return 0; }
+  return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
 }
 
 // Rate limiting, as a decision the caller makes with limiters it owns. Split out

@@ -1797,10 +1797,10 @@ void MyMesh::loopMqttControl() {
     return;
   }
 
-  char reply[160];
-  bool authentic = false;
+  char reply[MQTTCTRL_MAX_REPLY];
+  MqttCtrlOutcome outcome;
   MqttCtrlResult result = mqtt_control.drain(owner, getRTCClock()->getCurrentTime(),
-                                             this, reply, sizeof(reply), &authentic);
+                                             this, reply, sizeof(reply), &outcome);
   MESH_DEBUG_PRINTLN("MqttControl: result %d, reply '%s'", (uint32_t)result, reply);
 
   // Only an outcome the owner key vouched for is published -- see the note on
@@ -1808,25 +1808,23 @@ void MyMesh::loopMqttControl() {
   // silence is indistinguishable from one that is switched off or un-flashed,
   // and this fleet runs several firmware versions at once, so that ambiguity is
   // exactly what makes it unreadable.
-  if (authentic) publishMqttControlResult(result, reply);
+  if (outcome.authentic) publishMqttControlResult(result, outcome, reply);
 }
 
 // The result topic is built once in setupMqttControl and is empty when the node
 // has no region, in which case there is no control plane to answer on.
-void MyMesh::publishMqttControlResult(MqttCtrlResult result, const char* reply) {
+void MyMesh::publishMqttControlResult(MqttCtrlResult result, const MqttCtrlOutcome& outcome,
+                                      const char* reply) {
   if (bridge == NULL || _ctrl_result[0] == 0) return;
 
-  // A refusal runs no command and so leaves the reply buffer empty. Publishing
-  // the bare code keeps the answer non-empty, which is what lets a requester
-  // tell "refused" from "never arrived".
-  char payload[192];
-  int n = (reply != NULL && reply[0] != 0)
-            ? snprintf(payload, sizeof(payload), "%s", reply)
-            : snprintf(payload, sizeof(payload), "err %d", (int)result);
-  if (n <= 0) return;
-  if (n >= (int)sizeof(payload)) n = (int)sizeof(payload) - 1;
+  // A refusal runs no command and leaves the reply empty; the code field still
+  // says why, which is what lets a requester tell "refused" from "never arrived".
+  char payload[MQTTCTRL_MAX_RESULT];
+  size_t n = mqttCtrlFormatResult(payload, sizeof(payload), outcome.counter,
+                                  (int)result, outcome.command, reply);
+  if (n == 0) return;
 
-  bridge->publishControlResult(_ctrl_result, payload, (size_t)n);
+  bridge->publishControlResult(_ctrl_result, payload, n);
 }
 
 #endif
