@@ -579,7 +579,12 @@ bool CommonCLI::handleObserverSetCmd(uint32_t sender_timestamp, const char* conf
     savePrefs();
     _callbacks->restartBridgeSlot(slot);
     strcpy(reply, "OK");
-  } else if (memcmp(config, "mqtt.owner ", 11) == 0) {
+  } else if (sender_timestamp == 0 && memcmp(config, "mqtt.owner ", 11) == 0) {
+    // Serial console only, matching `get mqtt.owner` below. This is the key that
+    // authorises every signed MQTT command, so rotating it must not itself be
+    // reachable over MQTT: the allowlist already refuses `set mqtt.owner`, and
+    // this restores the second, independent guard the comments in
+    // MqttControlLogic.h and MqttControl.cpp both claim is already here.
     const char* owner_key = &config[11];
     if (owner_key[0] == '\0') {
       // Owner key is optional — empty clears it (previously this errored, so a
