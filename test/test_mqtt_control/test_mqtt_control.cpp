@@ -596,3 +596,47 @@ TEST(FormatResult, TheBufferFitsTheLongestPossibleLine) {
                                   cmd.c_str(), rep.c_str());
   EXPECT_LT(n, sizeof(out) - 1) << "MQTTCTRL_MAX_RESULT must not clamp a legal line";
 }
+
+// ---- guard rails on the trigger -----------------------------------------------
+
+TEST(BroadcastGuard, RecognisesTheBroadcastTopic) {
+  EXPECT_TRUE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/a1b2c3d4/cmd"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("meshcore/JKG/all/res"));
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast("all/cmd"));   // no region segment
+  EXPECT_FALSE(mqttCtrlTopicIsBroadcast(NULL));
+}
+
+TEST(BroadcastGuard, ATransmitCommandMayNotBeAddressedToEveryNode) {
+  // The rate limits are per node -- four triggers an hour each. That bounds one
+  // node and says nothing about one publish reaching every node in a region, each
+  // then transmitting inside the same few seconds and each within budget. The
+  // workspace rule is that no design may scale transmissions with the node count.
+  EXPECT_EQ(MQTTCTRL_ERR_BROADCAST_TRANSMIT,
+            mqttCtrlTransmitTopicResult(true, "meshcore/JKG/all/cmd"));
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(true, "meshcore/JKG/a1b2c3d4/cmd"));
+}
+
+TEST(BroadcastGuard, ABroadcastParameterChangeIsStillAllowed) {
+  // Setting a value costs no airtime, so fleet-wide configuration stays possible.
+  // Only transmitting is refused.
+  EXPECT_EQ(MQTTCTRL_OK, mqttCtrlTransmitTopicResult(false, "meshcore/JKG/all/cmd"));
+  EXPECT_FALSE(mqttCtrlIsTransmitCommand("set autoreply.delay 8", 21));
+  EXPECT_TRUE(mqttCtrlIsTransmitCommand("trigger test", 12));
+}
+
+TEST(BroadcastGuard, TheRefusalHasItsOwnAppendedCode) {
+  EXPECT_EQ((int)MQTTCTRL_ERR_BROADCAST_TRANSMIT, 18);
+  EXPECT_NE(MQTTCTRL_ERR_BROADCAST_TRANSMIT, MQTTCTRL_ERR_NOT_ALLOWED);
+  EXPECT_NE(MQTTCTRL_ERR_BROADCAST_TRANSMIT, MQTTCTRL_ERR_RATE_LIMITED);
+}
+
+TEST(BroadcastGuard, ARefusalIsPublishableRatherThanSilent) {
+  // It is refused after the signature verified, so T-05 publishes it: a requester
+  // learns the node exists and declined, which is not what silence would say.
+  char out[MQTTCTRL_MAX_RESULT];
+  size_t n = mqttCtrlFormatResult(out, sizeof(out), 5,
+                                  (int)MQTTCTRL_ERR_BROADCAST_TRANSMIT, "trigger test", "");
+  EXPECT_GT(n, 0u);
+  EXPECT_EQ(std::string("r1|5|18|trigger test|"), std::string(out));
+}

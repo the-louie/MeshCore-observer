@@ -87,6 +87,22 @@ of the second guard: MQTT commands run with the node's clock rather than the `0`
 locally-privileged caller, so `set prv.key`, `erase` and `set mqtt.owner` refuse them anyway.
 Either alone should be enough; both together mean one of them can be wrong.
 
+### A transmit command may not be broadcast
+
+`trigger test` sent to `meshcore/{IATA}/all/cmd` is refused, on principle rather than on
+budget.
+
+The rate limits are per node — four triggers an hour each. That bounds what one node does and
+says nothing about one publish reaching every node in a region, each of them then transmitting
+inside the same few seconds, every one within its own budget. The workspace rule is explicit
+that any design which scales transmissions with the number of nodes is wrong, and a broadcast
+trigger is exactly that shape: the more of the mesh adopts this firmware, the worse the storm
+it enables.
+
+Broadcasting a *parameter* change stays allowed — setting a value costs no airtime. Only
+transmitting is refused, and the check is stateless so it runs before the limiters spend
+anything.
+
 ## What is not defended
 
 - **Confidentiality.** Commands and results are public on a public broker. Nothing secret may
@@ -129,6 +145,7 @@ are refused; nothing readable is lost.
 | 12 | no trusted clock; expiry fails closed |
 | 14 | not on the allowlist — a permanent no |
 | 17 | rate limited — ask again later |
+| 18 | a transmit command addressed to every node at once |
 
 Codes are appended to the enum and never renumbered, so a stored result keeps its meaning.
 

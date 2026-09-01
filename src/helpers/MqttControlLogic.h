@@ -92,6 +92,9 @@ enum MqttCtrlResult {
   // "never". Reporting both as NOT_ALLOWED made a throttled node look like a
   // node refusing the command outright.
   MQTTCTRL_ERR_RATE_LIMITED,
+  // A transmit command addressed to every node in the region at once. Refused on
+  // principle rather than on budget -- see mqttCtrlTransmitTopicResult.
+  MQTTCTRL_ERR_BROADCAST_TRANSMIT,
 };
 
 // Can a staged command be examined at all?
@@ -375,6 +378,37 @@ static inline size_t mqttCtrlFormatResult(char* out, size_t out_size, uint32_t c
                    MQTTCTRL_FIELD_SEP, reply != NULL ? reply : "");
   if (n < 0) { out[0] = 0; return 0; }
   return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
+}
+
+// Is this the broadcast topic, meshcore/{IATA}/all/cmd, rather than one node's?
+// The per-node leaf is 8 hex characters, which can never spell "all", so matching
+// the tail is unambiguous.
+static inline bool mqttCtrlTopicIsBroadcast(const char* topic) {
+  if (topic == NULL) return false;
+  static const char SUFFIX[] = "/all/cmd";
+  size_t tlen = strlen(topic);
+  size_t slen = sizeof(SUFFIX) - 1;
+  return tlen >= slen && strcmp(topic + tlen - slen, SUFFIX) == 0;
+}
+
+// A transmit command may be addressed to one node, never to all of them.
+//
+// The rate limits are per node: four triggers an hour each. That bounds what any
+// single node does and says nothing about what happens when one publish reaches
+// every node in a region at once -- each of them then transmits, inside the same
+// few seconds, every one of them within budget. The workspace rule is explicit
+// that "any design that scales transmissions with the number of nodes is wrong",
+// and a broadcast trigger is exactly that shape: the more of the mesh adopts this
+// firmware, the worse the storm it enables.
+//
+// So this is refused on principle, not on budget, and the refusal is stateless --
+// it runs before the limiters, which spend when asked.
+//
+// Reversible if a real use appears: broadcasting a *parameter* change is fine and
+// stays allowed, because setting a value costs no airtime. Only transmitting does.
+static inline MqttCtrlResult mqttCtrlTransmitTopicResult(bool is_transmit, const char* topic) {
+  if (is_transmit && mqttCtrlTopicIsBroadcast(topic)) return MQTTCTRL_ERR_BROADCAST_TRANSMIT;
+  return MQTTCTRL_OK;
 }
 
 // Rate limiting, as a decision the caller makes with limiters it owns. Split out

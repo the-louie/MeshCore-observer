@@ -167,6 +167,11 @@ MqttCtrlResult MqttControl::drain(const mesh::Identity& owner, uint32_t now,
     // every stateless check: otherwise anyone could drain the budget with garbage
     // that was going to be refused anyway.
     bool transmit = mqttCtrlIsTransmitCommand(env.command, env.command_len);
+
+    // Stateless, so it runs before the limiters spend anything.
+    result = mqttCtrlTransmitTopicResult(transmit, _staged.topic);
+    if (result != MQTTCTRL_OK) break;
+
     result = mqttCtrlRateResult(transmit, _commands.allow(now),
                                 transmit ? _transmits.allow(now) : true);
     if (result != MQTTCTRL_OK) break;
