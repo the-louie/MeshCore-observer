@@ -133,7 +133,7 @@ anything.
 A node that verified a command publishes the outcome to its own result topic:
 
 ```
-meshcore/{IATA}/{PUBKEY}/res
+meshhealth/v1/{IATA}/{NODE}/res
 r1|<counter>|<code>|<command>|<reply>
 ```
 
