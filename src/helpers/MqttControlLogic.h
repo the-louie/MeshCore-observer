@@ -316,6 +316,20 @@ static inline bool mqttCtrlCommandAllowed(const char* command, size_t len) {
     "set autoreply",              // covers on|off and every autoreply.* setting
     "get autoreply",
     "trigger test",
+
+    // Read-only. Each one changes nothing, cannot be replayed into anything, and
+    // answers a question the model currently cannot ask: txdelay on the four
+    // repeaters that answer is the largest unexplained gap in it, and three of
+    // those four are somebody else's hardware. No `set` here -- a read keeps the
+    // security argument simple, and we do not yet know which values we would
+    // write.
+    "get txdelay",
+    "get direct.txdelay",         // the direct-path counterpart; the model needs both
+    "get rxdelay",
+    "get af",                     // airtime factor -- the duty-cycle budget
+    "get cad",
+    "get int.thresh",
+    "get radio",                  // freq, bandwidth, spreading factor, coding rate
   };
   for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
     if (mqttCtrlPrefixWithBoundary(command, len, allowed[i])) return true;

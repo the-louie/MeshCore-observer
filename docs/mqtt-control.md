@@ -75,17 +75,33 @@ feature enabled → owner key set → signature valid
 
 ## What may be sent
 
-Only auto-reply parameters and the test trigger:
+Auto-reply parameters, the test trigger, and a set of read-only parameter gets:
 
 ```
 set autoreply on|off · set autoreply.hops · set autoreply.direct.flood
 set autoreply.delay · set autoreply.region · get autoreply* · trigger test
+
+get txdelay · get direct.txdelay · get rxdelay · get af
+get cad · get int.thresh · get radio
 ```
+
+The reads change nothing and cannot be replayed into anything, which is what keeps the security
+argument simple. There is deliberately **no `set`** among them: we do not yet know which values
+we would write, and a write would need an argument this design has not had to make.
 
 Everything else is refused before it reaches the CLI. The allowlist is deliberately independent
 of the second guard: MQTT commands run with the node's clock rather than the `0` that marks a
 locally-privileged caller, so `set prv.key`, `erase` and `set mqtt.owner` refuse them anyway.
 Either alone should be enough; both together mean one of them can be wrong.
+
+**The allowlist is the tighter of the two gates and must stay that way.** It requires a match to
+end at end-of-string, a space or a dot; `CommonCLI`'s own `handleGetCmd` matches with an
+unbounded `memcmp`, so `get afxyz` would answer if it ever reached there. Do not relax the
+boundary rule to save allowlist entries.
+
+A node on older firmware will not know some of these and answers that it does not. That is the
+mixed fleet working as intended, and a reader must record it as "did not answer" rather than as
+an absent setting.
 
 ### A transmit command may not be broadcast
 

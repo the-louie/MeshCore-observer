@@ -640,3 +640,50 @@ TEST(BroadcastGuard, ARefusalIsPublishableRatherThanSilent) {
   EXPECT_GT(n, 0u);
   EXPECT_EQ(std::string("r1|5|18|trigger test|"), std::string(out));
 }
+
+// ---- the read-only additions to the allowlist ---------------------------------
+
+TEST(Allowlist, AdmitsTheReadOnlyParameterGets) {
+  EXPECT_TRUE(allowed("get txdelay"));
+  EXPECT_TRUE(allowed("get direct.txdelay"));
+  EXPECT_TRUE(allowed("get rxdelay"));
+  EXPECT_TRUE(allowed("get af"));
+  EXPECT_TRUE(allowed("get cad"));
+  EXPECT_TRUE(allowed("get int.thresh"));
+  EXPECT_TRUE(allowed("get radio"));
+}
+
+TEST(Allowlist, AReadDoesNotAdmitTheMatchingWrite) {
+  // The whole argument for widening is that a read changes nothing. If any of
+  // these let a `set` through, that argument is gone.
+  EXPECT_FALSE(allowed("set txdelay 0.5"));
+  EXPECT_FALSE(allowed("set direct.txdelay 0.3"));
+  EXPECT_FALSE(allowed("set rxdelay 0"));
+  EXPECT_FALSE(allowed("set af 9.0"));
+  EXPECT_FALSE(allowed("set cad on"));
+  EXPECT_FALSE(allowed("set int.thresh 1"));
+  EXPECT_FALSE(allowed("set radio 869.618,62.5,8,8"));
+}
+
+TEST(Allowlist, StaysTighterThanTheCliItGuards) {
+  // CommonCLI's handleGetCmd matches with an unbounded memcmp, so `get afxyz`
+  // would answer if it ever reached there. The allowlist requires end-of-string,
+  // a space or a dot, and is the tighter gate -- keep it that way rather than
+  // relaxing the boundary to save entries.
+  EXPECT_FALSE(allowed("get afxyz"));
+  EXPECT_FALSE(allowed("get radiofoo"));
+  EXPECT_FALSE(allowed("get txdelayx"));
+  EXPECT_FALSE(allowed("get int.threshold"));
+}
+
+TEST(Allowlist, TheWideningAddedNoPrivilegedCommand) {
+  // Re-pinned after the widening: these must still be refused, and the reads
+  // must not have opened a path to them.
+  EXPECT_FALSE(allowed("set prv.key 00112233"));
+  EXPECT_FALSE(allowed("erase"));
+  EXPECT_FALSE(allowed("set mqtt.owner AABB"));
+  EXPECT_FALSE(allowed("get prv.key"));
+  EXPECT_FALSE(allowed("get mqtt.owner"));
+  EXPECT_FALSE(allowed("get"));
+  EXPECT_FALSE(allowed("get "));
+}
