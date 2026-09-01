@@ -687,3 +687,56 @@ TEST(Allowlist, TheWideningAddedNoPrivilegedCommand) {
   EXPECT_FALSE(allowed("get"));
   EXPECT_FALSE(allowed("get "));
 }
+
+// ---- the boundary rule itself -------------------------------------------------
+//
+// Tested directly rather than only through the allowlist, because
+// docs/mqtt-control.md now names it as the reason the allowlist is the tighter of
+// the two gates: CommonCLI's own handleGetCmd matches with an unbounded memcmp.
+
+TEST(PrefixBoundary, AcceptsAnExactMatch) {
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("get af", 6, "get af"));
+}
+
+TEST(PrefixBoundary, AcceptsASpaceOrDotAfterThePrefix) {
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("get af 1", 8, "get af"));
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("set autoreply.hops 8", 20, "set autoreply"));
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("set autoreply on", 16, "set autoreply"));
+}
+
+TEST(PrefixBoundary, RefusesAPrefixThatRunsIntoAnotherWord) {
+  // The whole point: `get afxyz` must not ride in on `get af`.
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary("get afxyz", 9, "get af"));
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary("set autoreplyx", 14, "set autoreply"));
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary("triggerx", 8, "trigger"));
+}
+
+TEST(PrefixBoundary, RefusesSomethingShorterThanThePrefix) {
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary("get a", 5, "get af"));
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary("", 0, "get af"));
+}
+
+TEST(PrefixBoundary, IsCaseInsensitive) {
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("GET AF", 6, "get af"));
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("Trigger Test", 12, "trigger"));
+}
+
+TEST(PrefixBoundary, UsesTheGivenLengthNotTheTerminator) {
+  // The command is a byte range inside the envelope, not a C string, so a prefix
+  // must not be judged by what happens to follow the range in memory.
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary("get afxyz", 6, "get af"));
+}
+
+TEST(PrefixBoundary, ShorterThanThePrefixNeverReadsPastTheCommand) {
+  // The command points into the received payload and is NOT terminated: the byte
+  // after it is the next field. Without the length guard, comparing the full
+  // prefix walks past the command's own end into whatever followed it on the
+  // wire -- and if those bytes happen to complete the prefix, a five-byte
+  // command matches a six-byte allowlist entry.
+  //
+  // Written as an explicit range because a C string literal cannot show this:
+  // the terminator hides the bug that the guard exists to prevent.
+  const char payload[] = "get af get autoreply";
+  EXPECT_FALSE(mqttCtrlPrefixWithBoundary(payload, 5, "get af")) << "matched past the command";
+  EXPECT_TRUE(mqttCtrlPrefixWithBoundary(payload, 6, "get af"));
+}
