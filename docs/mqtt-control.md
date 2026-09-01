@@ -92,6 +92,7 @@ set autoreply.delay · set autoreply.region · get autoreply* · trigger test
 
 get txdelay · get direct.txdelay · get rxdelay · get af
 get cad · get int.thresh · get radio
+get repeat · get flood.max · get flood.max.unscoped
 ```
 
 The reads change nothing and cannot be replayed into anything, which is what keeps the security

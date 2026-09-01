@@ -938,3 +938,32 @@ TEST(ExactEntries, ExactMatchingUsesTheGivenLengthNotATerminator) {
   EXPECT_TRUE(mqttCtrlExactCommand(payload, 9, "get radio"));    // "get radio"
   EXPECT_FALSE(mqttCtrlExactCommand(payload, 16, "get radio"));  // the whole thing
 }
+
+// ---- reads that describe how a node floods -----------------------------------
+//
+// Added after a bench node was set `repeat off` and there was no way to confirm
+// it remotely. Whether a node forwards is not a detail: the topology model infers
+// it from traffic, and that inference once counted every phone and companion as a
+// relay.
+
+TEST(FloodReads, TheFloodBehaviourGetsAreAdmitted) {
+  EXPECT_TRUE(allowed("get repeat"));
+  EXPECT_TRUE(allowed("get flood.max"));
+  EXPECT_TRUE(allowed("get flood.max.unscoped"));
+}
+
+TEST(FloodReads, ExactMatchingKeepsTheTwoFloodEntriesApart) {
+  // `get flood.max` is exact, so it does not swallow `.unscoped` -- which is why
+  // that one needs its own entry rather than riding in on a prefix.
+  EXPECT_FALSE(allowed("get flood.max.anything"));
+  EXPECT_FALSE(allowed("get repeater"));
+  EXPECT_FALSE(allowed("get repeat on"));
+}
+
+TEST(FloodReads, TheMatchingWritesAreStillRefused) {
+  // `set repeat off` silences a node's forwarding. Doing that remotely to someone
+  // else's repeater would take it out of the mesh, so it stays off the allowlist.
+  EXPECT_FALSE(allowed("set repeat off"));
+  EXPECT_FALSE(allowed("set flood.max 3"));
+  EXPECT_FALSE(allowed("set flood.max.unscoped 2"));
+}

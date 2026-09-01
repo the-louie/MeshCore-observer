@@ -353,6 +353,14 @@ static inline bool mqttCtrlCommandAllowed(const char* command, size_t len) {
     { "get cad",            true },
     { "get int.thresh",     true },
     { "get radio",          true },
+
+    // How this node takes part in flooding, which the topology model otherwise
+    // has to infer from traffic. That inference has been wrong before: every node
+    // was once treated as a repeater, which counted phones and companions as
+    // relays. A node that can be asked settles it directly.
+    { "get repeat",              true },   // does it forward at all
+    { "get flood.max",           true },
+    { "get flood.max.unscoped",  true },
   };
 
   for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
