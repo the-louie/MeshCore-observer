@@ -18,7 +18,8 @@
 // The broker this rides on publishes its own credentials, so anyone can publish to
 // any topic. Nothing here may ever trust the transport: the signature is the only
 // thing that says who sent a command, and these functions run in the order given
-// in docs/architecture/decisions/001-mqtt-control-envelope.md -- cheap before
+// in the workspace root's docs/architecture/decisions/001-mqtt-control-envelope.md
+// (that tree is outside this repo, alongside it) -- cheap before
 // expensive, and the signature before anything it protects.
 
 // The envelope is deliberately not JSON. Signing a JSON document needs

@@ -6,7 +6,8 @@
 // The broker this rides on publishes its own credentials, so every one of these
 // functions is reachable by anyone. Most of what follows is therefore hostile
 // input rather than happy path: a bug here is a remote mesh-flood capability.
-// The design is docs/architecture/decisions/001-mqtt-control-envelope.md.
+// The design is docs/architecture/decisions/001-mqtt-control-envelope.md in the
+// workspace root, which is the directory above this repo, not a path inside it.
 #include <gtest/gtest.h>
 #include <string>
 #include "helpers/MqttControlLogic.h"
