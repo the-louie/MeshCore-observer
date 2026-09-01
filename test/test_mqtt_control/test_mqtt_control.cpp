@@ -422,3 +422,53 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+
+// ---- the owner key, and the staging slot it used to wedge --------------------
+//
+// Without a key there is nothing to verify against, so a staged command cannot
+// run. It must still be resolved: the slot holds exactly one command and clears
+// only when that command is disposed of. The firmware used to return early here,
+// latching the slot for the life of the boot and dropping every command after it
+// -- including the ones sent once a key had finally been provisioned.
+
+TEST(OwnerReady, AValidKeyIsReady) {
+  const char* key = "0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789abcdef";
+  EXPECT_EQ(strlen(key), 64u);
+  EXPECT_EQ(mqttCtrlOwnerReady(key), MQTTCTRL_OK);
+}
+
+TEST(OwnerReady, AnUnsetKeyIsRefusedRatherThanIgnored) {
+  EXPECT_EQ(mqttCtrlOwnerReady(""), MQTTCTRL_ERR_NO_OWNER_KEY);
+  EXPECT_EQ(mqttCtrlOwnerReady(NULL), MQTTCTRL_ERR_NO_OWNER_KEY);
+}
+
+TEST(OwnerReady, AMalformedKeyIsTheSameCaseAsNoKey) {
+  // fromHex would refuse these a moment later; refusing here keeps one rule in
+  // one place, and both paths must resolve the slot.
+  EXPECT_EQ(mqttCtrlOwnerReady("abc"), MQTTCTRL_ERR_NO_OWNER_KEY);
+  EXPECT_EQ(mqttCtrlOwnerReady("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"),
+            MQTTCTRL_ERR_NO_OWNER_KEY);   // 63
+  EXPECT_EQ(mqttCtrlOwnerReady("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"),
+            MQTTCTRL_ERR_NO_OWNER_KEY);   // 65
+  EXPECT_EQ(mqttCtrlOwnerReady("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"),
+            MQTTCTRL_ERR_NO_OWNER_KEY);   // non-hex
+}
+
+TEST(OwnerReady, TheRefusalHasItsOwnCodeAndDoesNotCollide) {
+  // A caller publishing the refusal must be able to say why. Reusing an existing
+  // code would make "no key" indistinguishable from a malformed payload.
+  EXPECT_NE(MQTTCTRL_ERR_NO_OWNER_KEY, MQTTCTRL_OK);
+  EXPECT_NE(MQTTCTRL_ERR_NO_OWNER_KEY, MQTTCTRL_ERR_EMPTY);
+  EXPECT_NE(MQTTCTRL_ERR_NO_OWNER_KEY, MQTTCTRL_ERR_NOT_ALLOWED);
+  EXPECT_NE(MQTTCTRL_ERR_NO_OWNER_KEY, MQTTCTRL_ERR_BAD_SIG_HEX);
+}
+
+TEST(OwnerReady, ExistingCodesKeepTheirNumbers) {
+  // panopticon/control.py and stored results read these as numbers, so the new
+  // code is appended and nothing before it may shift.
+  EXPECT_EQ((int)MQTTCTRL_OK, 0);
+  EXPECT_EQ((int)MQTTCTRL_ERR_EMPTY, 1);
+  EXPECT_EQ((int)MQTTCTRL_ERR_NOT_ALLOWED, 14);
+  EXPECT_EQ((int)MQTTCTRL_ERR_NO_OWNER_KEY, 15);
+}

@@ -1778,10 +1778,24 @@ void MyMesh::setupMqttControl(MQTTBridge* bridge) {
 void MyMesh::loopMqttControl() {
   if (!mqtt_control.hasPending()) return;
 
-  mesh::Identity owner;
+  // A staged command is always resolved -- run or discarded -- never left in the
+  // slot. These two returns used to leave it pending, which latched the slot for
+  // the life of the boot and dropped every command after it, including the ones
+  // sent once a key had finally been provisioned.
   const char* owner_hex = _cli.getObserverPrefs()->mqtt_owner_public_key;
-  if (owner_hex == NULL || owner_hex[0] == 0) return;    // inert without a key
-  if (!mesh::Utils::fromHex(owner.pub_key, PUB_KEY_SIZE, owner_hex)) return;
+  MqttCtrlResult ready = mqttCtrlOwnerReady(owner_hex);
+  if (ready != MQTTCTRL_OK) {
+    mqtt_control.discard();
+    MESH_DEBUG_PRINTLN("MqttControl: no usable owner key, command discarded");
+    return;
+  }
+
+  mesh::Identity owner;
+  if (!mesh::Utils::fromHex(owner.pub_key, PUB_KEY_SIZE, owner_hex)) {
+    mqtt_control.discard();
+    MESH_DEBUG_PRINTLN("MqttControl: owner key unreadable, command discarded");
+    return;
+  }
 
   char reply[160];
   MqttCtrlResult result = mqtt_control.drain(owner, getRTCClock()->getCurrentTime(),

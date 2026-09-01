@@ -6,6 +6,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include "MQTTObserverValidation.h"   // mqttOwnerKeyValid
+
 // Pure, dependency-free decisions behind the MQTT control plane. Factored out of
 // examples/simple_repeater/MqttControl.cpp so the envelope split, the replay
 // window, the expiry window and the command allowlist can be attacked on the host
@@ -71,7 +73,31 @@ enum MqttCtrlResult {
   MQTTCTRL_ERR_NO_CLOCK,
   MQTTCTRL_ERR_COMMAND_CHARS,
   MQTTCTRL_ERR_NOT_ALLOWED,
+  // Appended, never renumbered: test_mqtt_control and panopticon/control.py both
+  // read these as numbers, so an inserted value would silently re-label every
+  // stored result.
+  MQTTCTRL_ERR_NO_OWNER_KEY,
 };
+
+// Can a staged command be examined at all?
+//
+// Without a provisioned owner key there is nothing to verify a signature against,
+// so the command cannot be executed -- but it must still be *resolved*. The
+// caller owns a single staging slot that only clears when the command is
+// disposed of, and returning early here left it latched: every later command was
+// dropped for the life of the boot, including after a key was finally
+// provisioned. The bug was silent, and the documentation said the opposite
+// ("every command is refused"), which is why the rule now lives in a function
+// with a name and a test rather than in an early return.
+//
+// Unset, empty and malformed are one case, not three: none of them can verify a
+// signature, and `mesh::Utils::fromHex` would refuse the last a moment later.
+// `mqttOwnerKeyValid` already rejects NULL and the empty string, so guarding
+// those separately here was dead code -- a mutation that deleted the guard left
+// every test green, which is how it was found.
+static inline MqttCtrlResult mqttCtrlOwnerReady(const char* owner_hex) {
+  return mqttOwnerKeyValid(owner_hex) ? MQTTCTRL_OK : MQTTCTRL_ERR_NO_OWNER_KEY;
+}
 
 // One parsed envelope. Pointers refer into the caller's payload buffer, which
 // must outlive this struct -- the same convention AutoReplyRequest uses.

@@ -71,6 +71,11 @@ public:
   void stage(const char* topic, const uint8_t* payload, size_t len);
   bool hasPending() const { return _staged.pending; }
 
+  // Resolve a staged command without executing it. The slot holds one command and
+  // clears only when it is disposed of, so every path that declines to run one
+  // must call this or the slot latches and drops everything after it.
+  void discard() { _staged.pending = false; }
+
   // Called on the loop task. Verifies the staged command against 'owner' and runs
   // it through 'mesh' if it passes, writing a human-readable outcome into 'reply'
   // (at least 160 bytes, the CLI's own budget). Returns the verdict either way, so

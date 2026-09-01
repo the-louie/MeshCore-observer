@@ -20,7 +20,12 @@ set mqtt.cmd on
 get mqtt.cmd                          # state, and the highest command counter seen
 ```
 
-Both are needed. With `mqtt.cmd on` but no owner key, every command is refused.
+Both are needed. With `mqtt.cmd on` but no owner key, every command is refused -- and,
+importantly, *discarded*. The node holds one staged command at a time and a full slot drops
+the newer arrival, so a refusal that left the slot occupied would silently swallow every
+later command for the rest of the boot, including the ones sent once a key was finally
+provisioned. Refusing and clearing are the same act (`mqttCtrlOwnerReady`, tested in
+`test_mqtt_control`).
 
 ## Topics
 
