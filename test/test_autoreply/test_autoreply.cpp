@@ -579,6 +579,64 @@ TEST(HopsAllowed, ZeroAnswersDirectNeighboursOnly) {
   EXPECT_FALSE(autoReplyHopsAllowed(1, 0));
 }
 
+// ---- a private test request: the body an anonymous request carries ---------
+
+TEST(ParsePrivateTest, BareAndIdForms) {
+  char text[64];
+  const char* id = NULL; size_t id_len = 0;
+  copyText(text, sizeof(text), "test");
+  EXPECT_TRUE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+  EXPECT_EQ(NULL, id);
+  copyText(text, sizeof(text), "TEST a1b2c3d4");
+  EXPECT_TRUE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+  EXPECT_EQ(std::string("a1b2c3d4"), std::string(id, id_len));
+}
+
+TEST(ParsePrivateTest, TrimsWhatATerminalOrClientMayAdd) {
+  char text[64];
+  const char* id = NULL; size_t id_len = 0;
+  copyText(text, sizeof(text), "  test a1b2c3d4 \r\n");
+  EXPECT_TRUE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+  EXPECT_EQ(std::string("a1b2c3d4"), std::string(id, id_len));
+}
+
+TEST(ParsePrivateTest, AModeOrAKeyHasNothingToSayHere) {
+  // The packet already makes the reply private and already names the sender by
+  // key, so a mode letter or a key in the body is refused as chat -- the same
+  // refusal a mode-less caller makes on the channel, from the same function.
+  const std::string bad[] = {
+    "test S", "test a1b2c3d4 P", std::string("test a1b2c3d4 P ") + KEY, "test a1b2c3d4 F",
+  };
+  for (const std::string& s : bad) {
+    char text[160];
+    const char* id = NULL; size_t id_len = 0;
+    copyText(text, sizeof(text), s.c_str());
+    EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len)) << s;
+    EXPECT_EQ(NULL, id) << s;
+  }
+}
+
+TEST(ParsePrivateTest, NoNamePrefixToSplit) {
+  // A channel request may say "Louie: test"; a private one is from a key, and a
+  // name prefix would only be a way to type a request that is not one.
+  char text[64];
+  const char* id = NULL; size_t id_len = 0;
+  copyText(text, sizeof(text), "Louie: test");
+  EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+}
+
+TEST(ParsePrivateTest, HandlesNullsAndChat) {
+  char text[64];
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParsePrivateTest(NULL, "test", &id, &id_len));
+  copyText(text, sizeof(text), "test");
+  EXPECT_FALSE(autoReplyParsePrivateTest(text, NULL, &id, &id_len));
+  copyText(text, sizeof(text), "test me");
+  EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+  copyText(text, sizeof(text), "");
+  EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
+}
+
 // ---- reading an on/off argument --------------------------------------------
 
 TEST(ParseOnOff, AcceptsBothValuesInAnyCase) {

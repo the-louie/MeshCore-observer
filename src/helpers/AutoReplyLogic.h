@@ -350,6 +350,29 @@ static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* key
   return req;
 }
 
+// The body of a private test request -- the text an anonymous request carries after
+// its sub-type byte -- against the trigger keyword. Only the bare keyword and the
+// keyword with an id are requests here: the packet already names its sender by key
+// and already makes the reply private, so a mode letter or a key in the body has
+// nothing to say and is refused as chat, exactly as a mode-less caller refuses them
+// on the channel. There is no name prefix to split either; a key is the sender.
+// 'text' is trimmed in place like a channel request, so a stray line ending or
+// trailing space does not turn a request into chat.
+static inline bool autoReplyParsePrivateTest(char* text, const char* keyword,
+                                             const char** id, size_t* id_len) {
+  *id = NULL;
+  *id_len = 0;
+  if (text == NULL || keyword == NULL) return false;
+
+  char* msg = text;
+  while (*msg == ' ') msg++;
+  char* end = msg + strlen(msg);
+  while (end > msg && (end[-1] == ' ' || end[-1] == '\n' || end[-1] == '\r')) end--;
+  *end = 0;
+
+  return autoReplyMatchTrigger(msg, keyword, id, id_len);
+}
+
 // Read an 'on' or 'off' argument, the form every boolean setting in this feature
 // takes. The token ends at the first space or line ending, so a value typed with
 // trailing whitespace still reads, while a word that merely starts with 'on' does
