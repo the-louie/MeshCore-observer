@@ -63,10 +63,14 @@ To turn it off again: `set autoreply off`.
 | `set autoreply on\|off` | `off` | Whether this repeater answers the trigger. |
 | `set autoreply.hops <0-63>` | `8` | How many hops away a request may be and still get an answer. `0` = direct neighbours only. |
 | `set autoreply.direct.flood on\|off` | `on` | Whether a request that arrived direct is answered with a flood. `off` sends a single zero-hop packet that no repeater relays — cheapest, but it never reaches anyone who cannot hear this repeater directly. |
+| `set autoreply.mode flood\|private\|direct` | `flood` | How a request that names no mode is answered. `private` and `direct` answer with a text message to the requester alone, and only when the request carries their key. |
+| `set autoreply.private on\|off` | `off` | Whether a test request sent to this repeater alone, off the channel, is answered. Off because it is an unauthenticated packet that makes the node transmit. |
 | `get autoreply` | — | Current state, in one line. |
 | `get autoreply.channel` | — | The channel name. **Read-only** — it follows `set mqtt.iata`. |
 | `get autoreply.hops` | — | Read the hop limit back. |
 | `get autoreply.direct.flood` | — | Read the direct-reply mode back. |
+| `get autoreply.mode` | — | Read the standing mode back. |
+| `get autoreply.private` | — | Read the private-request switch back. |
 
 The trigger word is `test`, case-insensitive — `test`, `Test` and `TEST` all work, which
 matters because phone keyboards like to capitalise the first letter. Override it at build

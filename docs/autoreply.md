@@ -219,12 +219,30 @@ A probe originated over the signed MQTT control plane names a mode the same way:
 its own public key for `P` and `D`, since the probe's requester is itself; a key given in the
 command is refused. A probe names no mode unless asked to, for the reason a request does not.
 
+The requester side of a private request is the same control plane:
+`trigger private <64 hex> [<id>]` makes the node send one to the repeater with that key. Here
+the key names the *target*; the node's own key goes into the packet by construction. See
+[A private request](#a-private-request).
+
+#### Answer a private request
+
+- `get autoreply.private`
+- `set autoreply.private on|off`
+
+**Default:** `off`
+
+Whether a test request sent to this repeater alone, off the channel, is answered. It is an
+unauthenticated packet that makes the node transmit, and a node should not gain a new way to be
+made to transmit by being upgraded — so it stays off until an operator turns it on. What the
+request is, how the answer travels and what it costs is under
+[A private request](#a-private-request).
+
 #### Show the current state
 
 - `get autoreply`
 
 ```
-> on #test-sto 'test' max 8 hops, direct flood, mode flood
+> on #test-sto 'test' max 8 hops, direct flood, mode flood, private off
 ```
 
 ## How far the reply travels
@@ -323,6 +341,56 @@ needs nothing but the channel, which is the property the feature was built for.
 channel, never with silence — see the fallback under
 [Choose how a request is answered](#choose-how-a-request-is-answered).
 
+### A private request
+
+Everything above changes how a request on the channel is answered. A request can also be sent
+to one repeater alone and never touch the channel at all: an anonymous request — the packet a
+client uses to log in to a repeater, under a sub-type of its own — carrying `test` or
+`test <8 hex>` as its body. The repeater answers with the report it would have sent on the
+channel — name, requester, id, SNR, RSSI, hops, path — as a response to the key the request
+came from, so a private measurement and a channel one compare like for like. The requester is
+named in the brackets by the first four bytes of that key in hex, `[a1b2c3d4]`: a key is what
+the packet carries, and nobody can type somebody else's. No group text is sent, nobody on the
+channel sees anything, and no other repeater answers.
+
+A request may reach the repeater either way, and the answer travels accordingly:
+
+| Request arrived | Reply |
+|---|---|
+| **Flooded** | Returned along the path the flood collected, carrying that path, exactly as a login is answered — so a requester that has no path to the repeater floods and gets one with the answer. |
+| **Direct** | Flooded, scoped as a channel reply is. The body carries no reply path, so there is no other way home. |
+
+**The switch.** `set autoreply.private on`, off by default, with `autoreply on` and a region
+set — the gate every reply shares, since a node with no region has no auto-reply at all.
+`autoreply.hops` does not apply: it bounds which of the requests every repeater hears this one
+answers, and a private request was addressed to this node and nobody else, so distance is not
+a reason to leave it unanswered — the hop count is reported, not judged. Nor does
+`autoreply.delay`: one node was asked, there is no storm to spread, and the answer leaves after
+the short fixed wait every anonymous request gets.
+
+**Charged to the key.** The cooldown is charged to the requester's key rather than to a name:
+one answer per key per five minutes, in a ring of the last 16 keys, the same window and the
+same rule as on the channel. The private path also has a budget of its own — 10 answers per
+five minutes, separate from the channel's — and this is the guard that matters: a burst of
+requests each under a fresh key passes every per-key check, and this cap is what bounds it.
+Neither budget can be spent from the other side. A request refused by either gets nothing back;
+there is no cheaper answer that is not still a transmission.
+
+**No contact is needed, on either side.** The request carries the requester's key and the
+repeater derives the secret it answers under from that, the way it does for a login from a
+client it has never met. The contact caveat under `P` and `D` does not arise either, because
+the measurement is not the reply's content. A stock companion has no button for this; the
+requester side is our own observer nodes, over the signed MQTT control plane:
+`trigger private <64 hex> [<id>]` makes an observer node send the request, flooded and scoped
+exactly as a channel probe is so a target with no path from there still hears it. The key in
+the command is the target's, the node's own goes into the packet by construction, and the
+answer comes back addressed to that node — the observer feed reports it arriving, which is the
+measurement, whether or not the node can read it. See [MQTT control](mqtt-control.md).
+
+**A reply cannot become a request.** The repeater reads a test out of an anonymous request
+only; a response is a different packet type and is never parsed as one — see
+[A reply can never trigger a reply](#a-reply-can-never-trigger-a-reply).
+
 ## A reply can never trigger a reply
 
 Every repeater in range answers the same trigger, so the one thing the feature must never
@@ -340,7 +408,9 @@ A private reply is safer still, for a structural reason. It is a text message ad
 one key, and a repeater acts on an incoming text message only from a node already in its
 own access list as an admin — anything else is dropped before it is parsed, and a repeater
 is never another repeater's admin. So a private reply that reaches a peer repeater is not
-a request that fails to match; it is a packet that is never read as one.
+a request that fails to match; it is a packet that is never read as one. The answer to a
+private request is a response, not a request, and the repeater looks for the keyword in
+anonymous requests alone — the same property, held by packet type.
 
 ## What it costs
 
@@ -365,6 +435,10 @@ Be honest with yourself about the traffic before enabling this:
   addressed to one node. `D` is one packet per hop back along the request's path, and a
   single packet when the request arrived direct. Private replies are charged against both
   rate limits like any other; a silent request is charged against neither, as nothing is sent.
+- A private request is one packet to one node and one reply back — a single flood, or the
+  path-return when the request was flooded — and no storm, since no other repeater answers.
+  It is charged to the requester's key and to the private path's own 10-per-5-minute budget,
+  not to the channel's.
 - Only the keyword, alone or with its exact id and mode tail, triggers a reply, and the match
   is case-insensitive — so ordinary chat on the channel is ignored, and a reply can never
   trigger another reply.

@@ -1,7 +1,7 @@
 # Remote control over MQTT
 
 An observer node can accept commands published to it over MQTT: parameter changes, and a
-request to send a test now. It is **off by default** and inert without a configured owner key.
+request to send a test now, on the channel or to one repeater alone. It is **off by default** and inert without a configured owner key.
 
 Flashing a fleet takes months. This exists so that changing a parameter afterwards costs a
 signed publish rather than another flashing round.
@@ -74,7 +74,7 @@ feature enabled → owner key set → signature valid
 ```
 
 - **The counter is stored before the command runs**, never after. A counter written afterwards
-  is reopened by whatever crashes mid-command, and a silently repeated `trigger test` spends
+  is reopened by whatever crashes mid-command, and a silently repeated trigger spends
   airtime nobody asked for. The cost is that a crashed command is not retried, which is the
   right way round.
 - **Expiry fails closed without a clock.** If NTP has not synced, every command is refused
@@ -84,25 +84,32 @@ feature enabled → owner key set → signature valid
 
 ## What may be sent
 
-Auto-reply parameters, the test trigger, and a set of read-only parameter gets:
+Auto-reply parameters, the two test triggers, and a set of read-only parameter gets:
 
 ```
 set autoreply on|off · set autoreply.hops · set autoreply.direct.flood
-set autoreply.delay · set autoreply.region · get autoreply* · trigger test
+set autoreply.delay · set autoreply.region · set autoreply.mode · set autoreply.private
+get autoreply* · trigger test [<id>] [<F|P|D|S>] · trigger private <64 hex> [<id>]
 
 get txdelay · get direct.txdelay · get rxdelay · get af
 get cad · get int.thresh · get radio
 get repeat · get flood.max · get flood.max.unscoped
 ```
 
+`trigger test` originates a probe on the channel, naming a mode the way a request sent by hand
+does; `trigger private` sends a test request to the one repeater whose key is given, and the
+answer comes back to this node alone. Both are described in
+[Repeater auto-reply](autoreply.md).
+
 The reads change nothing and cannot be replayed into anything, which is what keeps the security
 argument simple. There is deliberately **no `set`** among them: we do not yet know which values
 we would write, and a write would need an argument this design has not had to make.
 
-**The two groups match differently, and the difference is the point.** The first three are
+**The two groups match differently, and the difference is the point.** The first four are
 *families*: the boundary rule lets `set autoreply` cover `set autoreply.hops 8` and the rest,
-one entry instead of five. The reads are *exact* — each admits the command it names and nothing
-else. A family silently admits children nobody listed, and `get radio` was admitting
+one entry instead of five, and `trigger test` its optional id and mode letter. The reads are
+*exact* — each admits the command it names and nothing else. A family silently admits children
+nobody listed, and `get radio` was admitting
 `get radio.rxgain`, `get radio.fem.rxgain` and `get radio foo` that way. Harmless values, but
 this list exists to be read by an operator deciding what a node exposes, and an entry that
 admits more than it says defeats that. Adding `get af.thing` to `CommonCLI` later cannot reach
@@ -124,8 +131,8 @@ an absent setting.
 
 ### A transmit command may not be broadcast
 
-`trigger test` sent to `meshcore/{IATA}/all/cmd` is refused, on principle rather than on
-budget.
+`trigger test` or `trigger private` sent to `meshcore/{IATA}/all/cmd` is refused, on principle
+rather than on budget.
 
 The rate limits are per node — four triggers an hour each. That bounds what one node does and
 says nothing about one publish reaching every node in a region, each of them then transmitting
