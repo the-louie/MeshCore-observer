@@ -33,6 +33,13 @@
 // AUTOREPLY_MAX_REPLIES so a sender can never be evicted while still cooling down.
 #define AUTOREPLY_MAX_SENDERS 16
 
+// Where a built reply goes. For a flood, nothing but the mode; for a private mode
+// the requester's public key, decoded from the request that carried it.
+struct AutoReplyTarget {
+  uint8_t mode;
+  uint8_t pubkey[PUB_KEY_SIZE];
+};
+
 /**
  * \brief  Replies to a keyword on the node's regional test channel, with a signal
  *         + path report.
@@ -123,9 +130,15 @@ public:
 
   /**
    * \brief  Test an incoming group text for the trigger, and build the reply payload.
-   * \param  dest  OUT - group datagram payload, needs AUTOREPLY_MAX_PAYLOAD bytes
+   *
+   * The payload has the same layout for a group text and for a private text message,
+   * so 'dest' serves either; 'target' says which, and for a private one to whom.
+   *
+   * \param  dest  OUT - reply payload, needs AUTOREPLY_MAX_PAYLOAD bytes
+   * \param  target  OUT - how to send it: AUTOREPLY_MODE_FLOOD, or PRIVATE/DIRECT with the key
    * \returns  length of the payload, or 0 to stay silent
    */
   int buildReply(const mesh::Packet* req, const uint8_t* data, size_t len,
-                 const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest);
+                 const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest,
+                 AutoReplyTarget* target);
 };

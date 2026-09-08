@@ -1008,10 +1008,40 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
   bool zero_hop = autoReplyReplyIsZeroHop(packet->getPathHashCount(), auto_reply.directFlood());
 
   uint8_t temp[AUTOREPLY_MAX_PAYLOAD];
+  AutoReplyTarget target;
   int payload_len = auto_reply.buildReply(packet, data, len, _prefs.node_name,
                                           radio_driver.getLastRSSI(),
-                                          getRTCClock()->getCurrentTimeUnique(), temp);
+                                          getRTCClock()->getCurrentTimeUnique(), temp, &target);
   if (payload_len == 0) return;
+
+  if (target.mode != AUTOREPLY_MODE_FLOOD) {
+    // A private reply: the same payload as a text message addressed to the
+    // requester's key, which only they can read and no repeater re-broadcasts as
+    // a channel message. Direct sends it back down the path the request came in
+    // on, reversed; a request that arrived direct needs no path at all.
+    mesh::Identity dest(target.pubkey);
+    uint8_t secret[PUB_KEY_SIZE];
+    self_id.calcSharedSecret(secret, dest);
+    auto reply = createDatagram(PAYLOAD_TYPE_TXT_MSG, dest, secret, temp, payload_len);
+    if (!reply) {
+      MESH_DEBUG_PRINTLN("AutoReply: could not build private reply packet, pool empty");
+      return;
+    }
+    uint32_t delay_millis = getRetransmitDelay(reply) * auto_reply.delayFactor();
+    if (target.mode == AUTOREPLY_MODE_DIRECT && packet->getPathHashCount() == 0) {
+      MESH_DEBUG_PRINTLN("AutoReply: sending private zero-hop reply in %d ms", (uint32_t)delay_millis);
+      sendZeroHop(reply, delay_millis);
+    } else if (target.mode == AUTOREPLY_MODE_DIRECT) {
+      uint8_t back[MAX_PATH_SIZE];
+      uint8_t back_len = autoReplyReversePath(packet->path, packet->path_len, back);
+      MESH_DEBUG_PRINTLN("AutoReply: sending private direct reply in %d ms", (uint32_t)delay_millis);
+      sendDirect(reply, back, back_len, delay_millis);
+    } else {
+      MESH_DEBUG_PRINTLN("AutoReply: sending private flood reply in %d ms", (uint32_t)delay_millis);
+      sendFloodReply(reply, delay_millis, packet->getPathHashSize());
+    }
+    return;
+  }
 
   auto reply = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, temp, payload_len);
   if (reply) {

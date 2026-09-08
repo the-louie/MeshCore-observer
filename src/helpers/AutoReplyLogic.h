@@ -374,6 +374,26 @@ static inline bool autoReplyParseModeName(const char* arg, uint8_t* out) {
   return false;
 }
 
+// The route back to a requester whose flood arrived along 'path'. A flood collects
+// the hash of each repeater that carried it, first to last, so read backwards it
+// is the path from here to the requester -- and that is the only route a private
+// direct reply has. 'path_len' is the packet's encoded length byte (hash size in
+// the top two bits, count in the rest), returned unchanged so the caller can hand
+// both straight to sendDirect(). Hashes are reversed whole, never their bytes.
+//
+// The same links carried the request the other way, and this mesh is asymmetric
+// as a matter of course, so a reply sent down the reverse path can fail where a
+// flood would not. That is the trade the requester makes by asking for D.
+static inline uint8_t autoReplyReversePath(const uint8_t* path, uint8_t path_len,
+                                           uint8_t* out) {
+  uint8_t size = (path_len >> 6) + 1;
+  uint8_t count = path_len & 63;
+  for (uint8_t i = 0; i < count; i++) {
+    memcpy(out + i * size, path + (count - 1 - i) * size, size);
+  }
+  return path_len;
+}
+
 // A request from further away than 'max_hops' is ignored. Answering it means
 // flooding, and every repeater that heard it floods a reply of its own, so this is
 // the setting that bounds what one 'test' costs the mesh.

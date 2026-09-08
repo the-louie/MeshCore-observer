@@ -289,7 +289,8 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
 }
 
 int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t len,
-                          const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest) {
+                          const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest,
+                          AutoReplyTarget* target) {
   if (!_enabled || !_ready) return 0;
   if (len < 6) {                                      // timestamp + flags + at least one char
     MESH_DEBUG_PRINTLN("AutoReply: ignored, message too short (len=%d)", (uint32_t)len);
@@ -393,6 +394,13 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   snprintf(out, AUTOREPLY_MAX_TEXT, "%s: %s%sSNR %s RSSI %d %dh %s", node_name, who, tag,
            StrHelper::ftoa(req->getSNR()), (int)rssi, (uint32_t)hop_count, path_hex);
 
-  MESH_DEBUG_PRINTLN("AutoReply: replying '%s'", out);
+  // A private mode was resolved only if the request carried a key, so the decode
+  // cannot fail on length; the key's characters were checked when it was parsed.
+  target->mode = mode;
+  if (mode != AUTOREPLY_MODE_FLOOD) {
+    mesh::Utils::fromHex(target->pubkey, PUB_KEY_SIZE, request.pubkey_hex);
+  }
+
+  MESH_DEBUG_PRINTLN("AutoReply: replying '%s' (%s)", out, autoReplyModeName(mode));
   return 5 + strlen(out);
 }

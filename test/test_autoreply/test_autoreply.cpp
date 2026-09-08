@@ -640,6 +640,38 @@ TEST(ParseModeName, NamesRoundTrip) {
   EXPECT_STREQ("default", autoReplyModeName(AUTOREPLY_MODE_DEFAULT));
 }
 
+// ---- the route back: a flood's path, read backwards ------------------------
+
+TEST(ReversePath, ReversesWholeHashesNotBytes) {
+  // Three 2-byte hashes: the flood came AA11 -> BB22 -> CC33, so the way back
+  // starts at CC33. The bytes inside each hash keep their order.
+  const uint8_t path[] = { 0xAA, 0x11, 0xBB, 0x22, 0xCC, 0x33 };
+  const uint8_t path_len = (1 << 6) | 3;      // hash size 2, count 3
+  uint8_t back[sizeof(path)];
+  EXPECT_EQ(path_len, autoReplyReversePath(path, path_len, back));
+  const uint8_t want[] = { 0xCC, 0x33, 0xBB, 0x22, 0xAA, 0x11 };
+  EXPECT_EQ(0, memcmp(want, back, sizeof(want)));
+}
+
+TEST(ReversePath, OneByteHashesAndASingleHop) {
+  const uint8_t path[] = { 0x01, 0x02, 0x03, 0x04 };
+  uint8_t back[4];
+  autoReplyReversePath(path, 4, back);          // hash size 1, count 4
+  const uint8_t want[] = { 0x04, 0x03, 0x02, 0x01 };
+  EXPECT_EQ(0, memcmp(want, back, 4));
+
+  const uint8_t one[] = { 0x7A, 0x15, 0xAA };
+  uint8_t same[3];
+  EXPECT_EQ((2 << 6) | 1, autoReplyReversePath(one, (2 << 6) | 1, same));
+  EXPECT_EQ(0, memcmp(one, same, 3));           // a single hop is its own reverse
+}
+
+TEST(ReversePath, AnEmptyPathStaysEmpty) {
+  uint8_t back[1] = { 0xEE };
+  EXPECT_EQ(0, autoReplyReversePath(NULL, 0, back));
+  EXPECT_EQ(0xEE, back[0]);                     // nothing written
+}
+
 // ---- direct request: one packet, or one a repeater can carry back -----------
 
 TEST(ReplyIsZeroHop, DirectRequestOnlyWhenDirectFloodIsOff) {
