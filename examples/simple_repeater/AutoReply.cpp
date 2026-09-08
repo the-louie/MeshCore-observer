@@ -3,7 +3,8 @@
 #include <helpers/TxtDataHelpers.h>
 
 #define AUTOREPLY_CONFIG_FILE   "/autoreply"
-#define AUTOREPLY_CONFIG_VER    5
+#define AUTOREPLY_CONFIG_VER    6
+#define AUTOREPLY_CONFIG_VER_5  5    // ... + mode, before the private switch
 #define AUTOREPLY_CONFIG_VER_4  4    // enabled + hops + direct flood + delay + region, before the mode
 #define AUTOREPLY_CONFIG_VER_3  3    // enabled + hops + direct flood, before delay and region
 #define AUTOREPLY_CONFIG_VER_2  2    // enabled + hops, with no direct reply mode stored
@@ -32,7 +33,8 @@ static File openWrite(FILESYSTEM* fs, const char* filename) {
 
 AutoReply::AutoReply()
   : _fs(NULL), _enabled(false), _hops(8), _direct_flood(true),
-    _delay_factor(AUTOREPLY_DELAY_DEF), _mode(AUTOREPLY_MODE_FLOOD), _ready(false),
+    _delay_factor(AUTOREPLY_DELAY_DEF), _mode(AUTOREPLY_MODE_FLOOD), _private(false),
+    _ready(false),
     _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _iata[0] = 0;
@@ -79,22 +81,25 @@ void AutoReply::load() {
   if (file) {
     uint8_t ver = 0;
     file.read(&ver, 1);
-    // The file is append-only from v5 on: a newer firmware adds fields after the
-    // ones this one knows, never between them. So a file written by a *newer*
-    // version is read by the fields this version understands and the rest is
-    // ignored, and rolling firmware back no longer switches the feature off in
-    // silence. (A v4 reader cannot do the same for a v5 file; that is already in
-    // the field and is documented instead.)
-    if (ver >= AUTOREPLY_CONFIG_VER || ver == AUTOREPLY_CONFIG_VER_4) {
-      uint8_t enabled = 0, direct_flood = 1;
+    // The file is append-only from v5 on: each version adds its fields after the
+    // ones before it, never between them. So the v4 prefix is read for any file
+    // from v4 up, each later field only when the file's version has it, and a
+    // file written by a *newer* firmware is read by the fields this one knows and
+    // the rest ignored -- rolling firmware back no longer switches the feature
+    // off in silence. (A v4 reader cannot do the same for a v5 file; that is
+    // already in the field and is documented instead.)
+    if (ver >= AUTOREPLY_CONFIG_VER_4) {
+      uint8_t enabled = 0, direct_flood = 1, priv = 0;
       file.read(&enabled, 1);
       file.read(&_hops, 1);
       file.read(&direct_flood, 1);
       file.read(&_delay_factor, 1);
       file.read((uint8_t *) _region, sizeof(_region));
-      if (ver >= AUTOREPLY_CONFIG_VER) file.read(&_mode, 1);
+      if (ver >= AUTOREPLY_CONFIG_VER_5) file.read(&_mode, 1);
+      if (ver >= AUTOREPLY_CONFIG_VER) file.read(&priv, 1);
       _enabled = enabled != 0;
       _direct_flood = direct_flood != 0;
+      _private = priv != 0;
       _region[sizeof(_region) - 1] = 0;
       // A stored factor outside the range means a truncated or corrupt file; the
       // default is safer than a zero, which would make every repeater in range
@@ -147,6 +152,8 @@ void AutoReply::save() {
     file.write(&_delay_factor, 1);
     file.write((const uint8_t *) _region, sizeof(_region));
     file.write(&_mode, 1);
+    uint8_t priv = _private ? 1 : 0;
+    file.write(&priv, 1);
     file.close();
   }
 }
@@ -254,6 +261,21 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     return true;
   }
 
+  if (memcmp(command, "set autoreply.private ", 22) == 0) {
+    if (!autoReplyParseOnOff(&command[22], &_private)) {
+      strcpy(reply, "Err - use: set autoreply.private on|off");
+      return true;
+    }
+    save();
+    strcpy(reply, "OK");
+    return true;
+  }
+
+  if (strcmp(command, "get autoreply.private") == 0) {
+    sprintf(reply, "> %s", _private ? "on" : "off");
+    return true;
+  }
+
   if (strcmp(command, "get autoreply.mode") == 0) {
     sprintf(reply, "> %s", autoReplyModeName(_mode));
     return true;
@@ -278,9 +300,10 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     if (!_ready) {
       sprintf(reply, "> %s, no region - set mqtt.iata", _enabled ? "on" : "off");
     } else {
-      sprintf(reply, "> %s %s '%s' max %d hops, direct %s, mode %s", _enabled ? "on" : "off",
-              name, AUTOREPLY_KEYWORD, _hops, _direct_flood ? "flood" : "zero-hop",
-              autoReplyModeName(_mode));
+      sprintf(reply, "> %s %s '%s' max %d hops, direct %s, mode %s, private %s",
+              _enabled ? "on" : "off", name, AUTOREPLY_KEYWORD, _hops,
+              _direct_flood ? "flood" : "zero-hop", autoReplyModeName(_mode),
+              _private ? "on" : "off");
     }
     return true;
   }

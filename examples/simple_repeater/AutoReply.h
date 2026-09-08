@@ -68,6 +68,7 @@ class AutoReply {
   uint8_t _delay_factor;        // multiplier on the radio retransmit delay
   char _region[AUTOREPLY_MAX_REGION + 1];   // scope for the reply, empty = mirror the request
   uint8_t _mode;                // how a request that names no mode is answered
+  bool _private;                // answer a private test request sent to this node directly
   bool _ready;
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
@@ -101,6 +102,12 @@ public:
    * \brief  The standing reply mode, for a request that names none (AUTOREPLY_MODE_*).
    */
   uint8_t mode() const { return _mode; }
+  /**
+   * \brief  Whether a private test request -- an anonymous request to this node,
+   *         never a channel message -- is answered at all. Off unless switched on:
+   *         it is an unauthenticated packet that makes this node transmit.
+   */
+  bool privateEnabled() const { return _private; }
 
   /**
    * \brief  The derived '#test-<iata>' channel, for originating a probe on it.
