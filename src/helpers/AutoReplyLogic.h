@@ -59,6 +59,18 @@ static inline uint32_t autoReplySenderId(const char* name, size_t len) {
   return h;
 }
 
+// The same hash over a public key, for a private request: the packet names its
+// sender by key, which nobody else can type, so the cooldown is charged to the key
+// and not to a display name. Bytes are hashed as they are -- folding is for text.
+static inline uint32_t autoReplyKeyId(const uint8_t* key, size_t len) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < len; i++) {
+    h ^= key[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
 // Charge a reply to 'id' against the per-sender cooldown. Returns false while that
 // sender is still inside its window; otherwise records the reply and returns true.
 // A sender not in the ring takes the next slot, evicting the oldest entry.

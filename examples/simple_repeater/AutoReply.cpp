@@ -35,12 +35,31 @@ AutoReply::AutoReply()
   : _fs(NULL), _enabled(false), _hops(8), _direct_flood(true),
     _delay_factor(AUTOREPLY_DELAY_DEF), _mode(AUTOREPLY_MODE_FLOOD), _private(false),
     _ready(false),
-    _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
+    _limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS),
+    _private_limiter(AUTOREPLY_MAX_REPLIES, AUTOREPLY_WINDOW_SECS)
 {
   _iata[0] = 0;
   _region[0] = 0;
   memset(_senders, 0, sizeof(_senders));
   _next_sender = 0;
+  memset(_private_senders, 0, sizeof(_private_senders));
+  _next_private = 0;
+}
+
+bool AutoReply::privateAllowed(const uint8_t* pubkey, uint32_t timestamp) {
+  uint32_t key_id = autoReplyKeyId(pubkey, PUB_KEY_SIZE);
+  if (!autoReplySenderAllowed(_private_senders, AUTOREPLY_MAX_SENDERS, _next_private, key_id,
+                              timestamp, AUTOREPLY_WINDOW_SECS)) {
+    MESH_DEBUG_PRINTLN("AutoReply: private request from %02X%02X.. already answered in the last %d s",
+                       (uint32_t)pubkey[0], (uint32_t)pubkey[1], (uint32_t)AUTOREPLY_WINDOW_SECS);
+    return false;
+  }
+  if (!_private_limiter.allow(timestamp)) {
+    MESH_DEBUG_PRINTLN("AutoReply: private requests rate limited, %d already answered in the last %d s",
+                       (uint32_t)AUTOREPLY_MAX_REPLIES, (uint32_t)AUTOREPLY_WINDOW_SECS);
+    return false;
+  }
+  return true;
 }
 
 void AutoReply::begin(FILESYSTEM* fs) {

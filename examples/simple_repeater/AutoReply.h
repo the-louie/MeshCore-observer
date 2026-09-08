@@ -75,6 +75,11 @@ class AutoReply {
 
   AutoReplySender _senders[AUTOREPLY_MAX_SENDERS];
   uint8_t _next_sender;
+  // The private path keeps its own budget: a burst of private requests must not be
+  // able to spend the channel's replies, nor the other way round.
+  RateLimiter _private_limiter;
+  AutoReplySender _private_senders[AUTOREPLY_MAX_SENDERS];
+  uint8_t _next_private;
 
   void refreshChannel(const char* iata);
   void load();
@@ -108,6 +113,18 @@ public:
    *         it is an unauthenticated packet that makes this node transmit.
    */
   bool privateEnabled() const { return _private; }
+
+  /**
+   * \brief  Charge a private test request from 'pubkey' against its limits.
+   *
+   * The per-key cooldown first, so one requester retrying cannot spend the others'
+   * share; then the private path's own global cap, which is what bounds a burst of
+   * requests each under a fresh key. A request refused by either gets no reply at
+   * all -- there is no cheaper answer that would not still be a transmission.
+   *
+   * \returns  true if a reply may be sent
+   */
+  bool privateAllowed(const uint8_t* pubkey, uint32_t timestamp);
 
   /**
    * \brief  The derived '#test-<iata>' channel, for originating a probe on it.

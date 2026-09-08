@@ -579,6 +579,41 @@ TEST(HopsAllowed, ZeroAnswersDirectNeighboursOnly) {
   EXPECT_FALSE(autoReplyHopsAllowed(1, 0));
 }
 
+// ---- charging a private request to its key ---------------------------------
+
+TEST(KeyId, SameKeySameIdDifferentKeyDifferentId) {
+  uint8_t a[32], b[32];
+  memset(a, 0x5A, sizeof(a));
+  memcpy(b, a, sizeof(b));
+  EXPECT_EQ(autoReplyKeyId(a, 32), autoReplyKeyId(b, 32));
+  b[31] ^= 1;                                     // one bit of the last byte
+  EXPECT_NE(autoReplyKeyId(a, 32), autoReplyKeyId(b, 32));
+}
+
+TEST(KeyId, BytesAreNotFoldedLikeAName) {
+  // 0x41 and 0x61 are 'A' and 'a' as text and one sender to autoReplySenderId;
+  // as key bytes they are two different keys and must stay so.
+  uint8_t upper[32], lower[32];
+  memset(upper, 0x41, sizeof(upper));
+  memset(lower, 0x61, sizeof(lower));
+  EXPECT_NE(autoReplyKeyId(upper, 32), autoReplyKeyId(lower, 32));
+  EXPECT_EQ(autoReplySenderId((const char*)upper, 32), autoReplySenderId((const char*)lower, 32));
+}
+
+TEST(KeyId, TheCooldownRingWorksOnKeysUnchanged) {
+  // The same ring the channel uses, keyed by key id: a retry inside the window
+  // is refused, a second key is admitted, the first is admitted again after it.
+  AutoReplySender ring[4] = {};
+  uint8_t next = 0;
+  uint8_t k1[32], k2[32];
+  memset(k1, 1, 32); memset(k2, 2, 32);
+  uint32_t id1 = autoReplyKeyId(k1, 32), id2 = autoReplyKeyId(k2, 32);
+  EXPECT_TRUE(autoReplySenderAllowed(ring, 4, next, id1, 1000, 300));
+  EXPECT_FALSE(autoReplySenderAllowed(ring, 4, next, id1, 1100, 300));
+  EXPECT_TRUE(autoReplySenderAllowed(ring, 4, next, id2, 1100, 300));
+  EXPECT_TRUE(autoReplySenderAllowed(ring, 4, next, id1, 1300, 300));
+}
+
 // ---- a private test request: the body an anonymous request carries ---------
 
 TEST(ParsePrivateTest, BareAndIdForms) {
