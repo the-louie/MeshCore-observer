@@ -43,6 +43,15 @@ set autoreply off
 A node with no region code set — no `mqtt.iata`, or the `XXX` placeholder — has no channel
 to listen on and stays silent even with `set autoreply on`. `get autoreply` says so.
 
+**Rolling firmware back.** The settings live in the node's own `/autoreply` file, and every
+release reads the files all earlier releases wrote, so upgrading keeps them. Downgrading does
+not, unless both ends are new enough. Firmware older than file format version 5 reads nothing
+from a newer file, so after a rollback to such a version the feature comes up **off** and has
+to be switched on again with `set autoreply on`, and `hops`, `delay` and `region` re-entered.
+From version 5 on the format is append-only: a newer file is read by the fields the older
+firmware knows and the rest is ignored, so a rollback to any version from 5 onwards keeps
+every setting that version understands.
+
 ## Commands
 
 #### Switch it on or off
@@ -79,8 +88,10 @@ keyboards capitalise the first letter, so this matters in practice.
 The keyword may be followed by a correlation id: one space, then exactly eight hexadecimal
 characters, as in `test a1b2c3d4`. The id is echoed back in the reply, so a requester can tie
 an answer to the request that provoked it — which arrival time can no longer do once replies
-are delayed by minutes. Anything else after the keyword is ordinary chat and is ignored, so
-`test me` and `test 123` still cost nobody any airtime.
+are delayed by minutes. Either form may then name how it wants to be answered, with one letter
+— see [Choose how a request is answered](#choose-how-a-request-is-answered). Anything else
+after the keyword is ordinary chat and is ignored, so `test me` and `test 123` still cost
+nobody any airtime.
 
 A bare `test` keeps working and will continue to. Fleets are flashed slowly, and a firmware
 that answered only the id form would drop every not-yet-updated node out of a survey.
@@ -157,9 +168,64 @@ asymmetric even when the antennas are not, and a zero-hop reply has no second ch
 alternative path. `off` is the right choice on dense urban sites, or where requesters are
 known to be in solid two-way range.
 
+#### Choose how a request is answered
+
+- `get autoreply.mode`
+- `set autoreply.mode flood|private|direct`
+
+**Default:** `flood`
+
+The standing mode: how a request that names none is answered. `flood` is the channel reply
+shown at the top of this page, the group text every repeater has always sent. `private` and
+`direct` answer with a text message to the requester alone — see
+[Private replies](#private-replies) for how the two travel, what they cost and what they
+need from the requester. A standing `private` or `direct` is honoured only by a request that
+carries a key, since that is where the reply is addressed; a request without one — every
+bare `test` — is answered on the channel whatever the setting. `silent` is deliberately not a
+standing mode: a node that should answer nobody is switched off, and silence is something a
+request asks for one probe at a time.
+
+A request names its own mode with one letter after the keyword, or after the id when it
+carries one:
+
+| Request | Answered |
+|---|---|
+| `test` | in the standing mode |
+| `test a1b2c3d4` | in the standing mode, with the id echoed |
+| `test F` · `test a1b2c3d4 F` | flooded on the channel, whatever the standing mode |
+| `test P <64 hex>` · `test a1b2c3d4 P <64 hex>` | with a private text message to that key, flooded |
+| `test D <64 hex>` · `test a1b2c3d4 D <64 hex>` | with a private text message to that key, sent back down the request's own path |
+| `test S` · `test a1b2c3d4 S` | not at all — the observer's MQTT uplink still reports the reception |
+
+The letter is case-insensitive, exactly one space separates the parts, and nothing may
+follow. An id is always eight hex digits and a mode always one letter, so a lone `F` or `D`
+is never read as a short id.
+
+The key is the requester's public key as 64 hexadecimal characters, the same form
+`set mqtt.owner` takes. A private reply has to be addressed to a key, because a group text
+names its sender only by a display name anyone can type. A `P` or `D` that carries no key is
+still a request, and is answered on the channel instead: a probe left unanswered for an
+addressing gap would look exactly like a dead repeater. A key after `F` or `S` is chat, since
+neither has anywhere to send one.
+
+**Bare `test` keeps working, unchanged.** A repeater on firmware from before the modes
+existed matches only the bare and id forms; to it a suffixed request is chat, and it stays
+silent. Senders should stay bare until the fleet is updated — a suffix asks a question only
+updated repeaters hear, and the ones that do not answer are exactly the ones a survey most
+needs to hear from.
+
+A probe originated over the signed MQTT control plane names a mode the same way:
+`trigger test [<id>] [<F|P|D|S>]` — see [MQTT control](mqtt-control.md). The node appends
+its own public key for `P` and `D`, since the probe's requester is itself; a key given in the
+command is refused. A probe names no mode unless asked to, for the reason a request does not.
+
 #### Show the current state
 
 - `get autoreply`
+
+```
+> on #test-sto 'test' max 8 hops, direct flood, mode flood
+```
 
 ## How far the reply travels
 
@@ -169,8 +235,9 @@ encrypted payload, which a repeater does not read. A message to `#test-sto` ther
 exactly the same airtime, over exactly the same hops, as one to `#test`. Naming the channel
 per region keeps it out of other people's message lists; it does not keep it off their air.
 
-What does limit propagation is the region transport code. So the repeater answers in one of
-two ways, and stays silent if it can do neither:
+What does limit propagation is the region transport code. So a channel reply goes out in
+one of two ways, and the repeater stays silent if it can do neither (a private reply has its
+own rules — [Private replies](#private-replies)):
 
 | Request arrived | Reply |
 |---|---|
@@ -198,6 +265,8 @@ What bounds it:
   A small value such as `2` or `3` keeps replies regional.
 * `autoreply.direct.flood off` — the only setting that produces no flood whatsoever, and
   only in combination with `autoreply.hops 0`. Either one alone still floods.
+* The request itself. `S` draws no reply and `D` no flood — but that is the requester's
+  choice per probe, not a setting on the node.
 * The rate limits (below).
 * Each repeater's own `flood.max` / `flood.max.unscoped`.
 
@@ -216,36 +285,43 @@ region allowf #test-sto
 Region keys are derived from the name in the same way, so `#test-sto` needs no key
 distribution either. See [CLI commands](cli_commands.md) for the full `region` syntax.
 
-## Possible improvement: reply direct along the reverse path
+## Private replies
 
-The multi-hop case currently costs a flood reply per repeater in range. It should be
-possible to avoid flooding entirely by replying **direct along the reverse of the path the
-request arrived by** — one packet per hop, targeted, reaching the sender without touching
-the rest of the mesh. That would make `autoreply.hops` a range setting rather than a cost
-setting.
+A request that names `P` or `D` and carries a key is answered with a text message to that key
+instead of a group text on the channel. The body is the same signal report, so the two layouts
+are one layout; only the addressing changes. Nobody else on the channel sees it, and the reply
+delay and both rate limits apply as they do to a channel reply. The two modes differ in how the
+message travels:
 
-The pieces are already there:
+| Mode | The reply |
+|---|---|
+| `P` | Flooded, scoped exactly as a channel reply is. Finds the requester wherever they are, through whichever repeaters can carry it. |
+| `D`, request arrived over 1+ hops | Sent back down the path the request came in on, reversed. One transmission per hop, and no repeater off that path retransmits it. |
+| `D`, request arrived direct | A single zero-hop packet. `autoreply.direct.flood` does not apply — the requester asked for the cheapest reply and gets it. |
 
-* A flood packet accumulates the hash of every repeater it crosses, appended in order
-  (`self_id.copyHashTo(&packet->path[n * hash_size], ...)`, `src/Mesh.cpp:349`). So an
-  inbound request carries the full route from the sender to us.
-* Direct routing forwards *any* payload type, group text included: a `ROUTE_TYPE_DIRECT`
-  packet with a non-empty path is matched against `path[0]`, forwarded, and the hop removes
-  itself (`src/Mesh.cpp:78-108`). When the path is exhausted the payload is handled
-  normally, so any node in range holding the channel key will decrypt it.
-* `sendDirect(pkt, path, path_len, delay)` already takes an explicit path.
+**The reverse path.** A flood collects the hash of every repeater that carried it, appended in
+order, so an inbound request holds the route from the requester to this node. Read backwards,
+that is the route from here to the requester, and it is the only route a direct reply has. The
+entries are reversed whole, at whatever hash size the request used, and the packet goes out
+direct along them: each repeater on the way matches its own hash at the front of the path,
+forwards, and removes itself, so the reply reaches the requester's neighbour and then the
+requester without touching the rest of the mesh.
 
-What needs care before trusting it:
+**Asymmetry is the trade.** The same links carried the request the other way, and this mesh is
+asymmetric as a matter of course — the reason `autoreply.direct.flood` defaults to `on` for a
+channel reply. A flood finds its own way round a link that only works one way; a direct reply
+does not, and there is no fallback: a `D` that fails is silence. A survey that wants the
+cheapest reply asks for `D` and accepts that; one that wants the reply to arrive asks for `P`.
 
-* **Order.** The inbound path is `[R1, R2, R3]` from the sender's side, where `R1` is the
-  sender's neighbour. Sending back means `[R3, R2, R1]`, so the path must be reversed —
-  unlike a client's `out_path`, which is used as-is.
-* **Hash size.** `getPathHashSize()` is 1-4 bytes per entry and the reversal must move whole
-  entries, not bytes. Keep within `MAX_PATH_SIZE`.
-* **Asymmetry.** A route that worked one way may not work back; a flood reply finds its own
-  way, a direct reply does not. A fallback is probably still wanted.
-* **Verify on hardware** that a direct-routed `PAYLOAD_TYPE_GRP_TXT` is displayed by stock
-  clients — group messages are normally flooded, so this path is unexercised.
+**The requester has to know the repeater.** A companion decrypts a text message only from a
+node it holds as a contact, so a private reply reaches a requester only if they have added the
+repeater; otherwise it arrives at their radio as a packet they cannot read. That is MeshCore's
+model, not a defect here, and it is why `flood` is the default and stays it: a channel reply
+needs nothing but the channel, which is the property the feature was built for.
+
+**Without a key there is no address.** A `P` or `D` that carries none is answered on the
+channel, never with silence — see the fallback under
+[Choose how a request is answered](#choose-how-a-request-is-answered).
 
 ## A reply can never trigger a reply
 
@@ -284,8 +360,14 @@ Be honest with yourself about the traffic before enabling this:
     ends, and the window starts at the first reply after an idle gap.
 - Replies are staggered by a random delay, scaled by `f_txdelay`, so nearby repeaters do
   not transmit on top of each other. Setting `f_txdelay` to `0` removes that stagger.
-- Only an exact, case-insensitive match on the keyword triggers a reply, so ordinary chat
-  on the channel is ignored — and a reply can never trigger another reply.
+- A request that names a mode changes the bill. `S` costs the mesh nothing beyond the
+  request itself: no reply, from any repeater. `P` is still one flood per repeater in range,
+  addressed to one node. `D` is one packet per hop back along the request's path, and a
+  single packet when the request arrived direct. Private replies are charged against both
+  rate limits like any other; a silent request is charged against neither, as nothing is sent.
+- Only the keyword, alone or with its exact id and mode tail, triggers a reply, and the match
+  is case-insensitive — so ordinary chat on the channel is ignored, and a reply can never
+  trigger another reply.
 
 If several repeaters you own cover the same area, consider enabling this on only one of
 them. Do not enable it on a channel that another bot already answers.
