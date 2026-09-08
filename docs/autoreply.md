@@ -247,6 +247,25 @@ What needs care before trusting it:
 * **Verify on hardware** that a direct-routed `PAYLOAD_TYPE_GRP_TXT` is displayed by stock
   clients — group messages are normally flooded, so this path is unexercised.
 
+## A reply can never trigger a reply
+
+Every repeater in range answers the same trigger, so the one thing the feature must never
+do is answer itself. Two repeaters that each took the other's reply for a request would
+answer each other until the rate limit stopped them, every five minutes, for ever.
+
+On the channel this holds by the shape of the text, not by any flag. A request is the
+keyword at the start of the message — `test`, or `test` and an id, or those and a mode
+letter — and a reply always begins with the node's name, then the bracketed requester, then
+the measurements. Nothing a repeater sends starts with the keyword, however the tail is
+parsed, and the host suite pins this with real reply bodies (`AReplyCanNeverTriggerAReply`
+in `test/test_autoreply`), including a requester whose own node is named `test`.
+
+A private reply is safer still, for a structural reason. It is a text message addressed to
+one key, and a repeater acts on an incoming text message only from a node already in its
+own access list as an admin — anything else is dropped before it is parsed, and a repeater
+is never another repeater's admin. So a private reply that reaches a peer repeater is not
+a request that fails to match; it is a packet that is never read as one.
+
 ## What it costs
 
 Be honest with yourself about the traffic before enabling this:

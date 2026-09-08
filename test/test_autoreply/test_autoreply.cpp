@@ -396,9 +396,32 @@ TEST(ParseRequest, AReplyCanNeverTriggerAReply) {
     "SE-JKG-Rep: [test a1b2c3d4] SNR 1.0 RSSI -100 0h direct",
     "SE-JKG-Rep: [test a1b2c3d4 S] SNR 1.0 RSSI -100 0h direct",
     "SE-JKG-Rep: [test S] SNR 1.0 RSSI -100 0h direct",
+    // A private reply has the same body as a channel one, and a requester who
+    // names their own node after the keyword still gets an answer that cannot
+    // come back around -- even with a key in the brackets.
+    "SE-JKG-Rep: [test a1b2c3d4 P AA04792D7804529FABF230B32DC8F7FA494D1B3280F153B2215C305E4FD654DC] "
+      "#a1b2c3d4 SNR 1.0 RSSI -100 2h AA,BB",
+    "SE-JKG-Rep: [test] #a1b2c3d4 SNR 1.0 RSSI -100 0h direct",
+    // The reply seen by a node with no name prefix of its own is the whole body.
+    "[test a1b2c3d4] SNR 1.0 RSSI -100 0h direct",
   };
   for (const char* s : replies) {
     char text[256];
+    copyText(text, sizeof(text), s);
+    EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << s;
+  }
+}
+
+TEST(ParseRequest, TheKeywordAloneTriggersOnlyAtTheStartOfTheMessage) {
+  // The invariant rests on where the keyword sits, not on what surrounds it: a
+  // message whose keyword is preceded by anything -- a node name, a bracket, a
+  // measurement -- is not a request. Pinned separately so a future match that
+  // searched for the keyword anywhere would fail here before it failed on air.
+  const char* not_at_start[] = {
+    "Louie: SNR 1.0 test", "Louie: [x] test", "Louie: #a1b2c3d4 test", "Louie: -test",
+  };
+  for (const char* s : not_at_start) {
+    char text[128];
     copyText(text, sizeof(text), s);
     EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << s;
   }
