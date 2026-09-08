@@ -595,6 +595,51 @@ TEST(ParseOnOff, RejectsEmptyAndDegenerateInput) {
   EXPECT_TRUE(v);
 }
 
+// ---- reading a mode name, as `set autoreply.mode` takes it -----------------
+
+TEST(ParseModeName, AcceptsTheThreeStandingModesInAnyCase) {
+  uint8_t m = AUTOREPLY_MODE_DEFAULT;
+  EXPECT_TRUE(autoReplyParseModeName("flood", &m));
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD, m);
+  EXPECT_TRUE(autoReplyParseModeName("Private", &m));
+  EXPECT_EQ(AUTOREPLY_MODE_PRIVATE, m);
+  EXPECT_TRUE(autoReplyParseModeName("DIRECT", &m));
+  EXPECT_EQ(AUTOREPLY_MODE_DIRECT, m);
+}
+
+TEST(ParseModeName, SilentIsNotAStandingMode) {
+  // A node that should answer nobody is switched off. Silence is what a request
+  // asks for, one probe at a time, never a setting the node keeps.
+  uint8_t m = AUTOREPLY_MODE_FLOOD;
+  EXPECT_FALSE(autoReplyParseModeName("silent", &m));
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD, m);   // a rejected argument leaves the setting alone
+}
+
+TEST(ParseModeName, MeasuresTheTokenLikeAnOnOffArgument) {
+  uint8_t m = AUTOREPLY_MODE_FLOOD;
+  EXPECT_FALSE(autoReplyParseModeName("flooding", &m));
+  EXPECT_FALSE(autoReplyParseModeName("priv", &m));
+  EXPECT_FALSE(autoReplyParseModeName("", &m));
+  EXPECT_FALSE(autoReplyParseModeName("   ", &m));
+  EXPECT_FALSE(autoReplyParseModeName(NULL, &m));
+  EXPECT_FALSE(autoReplyParseModeName("flood", NULL));
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD, m);
+  EXPECT_TRUE(autoReplyParseModeName("  direct\r\n", &m));
+  EXPECT_EQ(AUTOREPLY_MODE_DIRECT, m);
+}
+
+TEST(ParseModeName, NamesRoundTrip) {
+  // What `get autoreply.mode` prints is what `set autoreply.mode` accepts.
+  const uint8_t standing[] = { AUTOREPLY_MODE_FLOOD, AUTOREPLY_MODE_PRIVATE, AUTOREPLY_MODE_DIRECT };
+  for (uint8_t mode : standing) {
+    uint8_t back = AUTOREPLY_MODE_DEFAULT;
+    EXPECT_TRUE(autoReplyParseModeName(autoReplyModeName(mode), &back));
+    EXPECT_EQ(mode, back);
+  }
+  EXPECT_STREQ("silent", autoReplyModeName(AUTOREPLY_MODE_SILENT));
+  EXPECT_STREQ("default", autoReplyModeName(AUTOREPLY_MODE_DEFAULT));
+}
+
 // ---- direct request: one packet, or one a repeater can carry back -----------
 
 TEST(ReplyIsZeroHop, DirectRequestOnlyWhenDirectFloodIsOff) {

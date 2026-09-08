@@ -336,6 +336,44 @@ static inline bool autoReplyParseOnOff(const char* arg, bool* out) {
   return false;
 }
 
+// The name a mode is configured and reported by. Silent is deliberately absent:
+// it is something a request asks for, never a node's standing answer -- a node
+// that should answer nobody is switched off, not configured to stay quiet while
+// still parsing every request. Anything unrecognised is DEFAULT.
+static inline const char* autoReplyModeName(uint8_t mode) {
+  switch (mode) {
+    case AUTOREPLY_MODE_FLOOD:   return "flood";
+    case AUTOREPLY_MODE_PRIVATE: return "private";
+    case AUTOREPLY_MODE_DIRECT:  return "direct";
+    case AUTOREPLY_MODE_SILENT:  return "silent";
+    default:                     return "default";
+  }
+}
+
+// Read a mode name as `set autoreply.mode` takes it. Measured the same way an
+// on/off argument is, so 'flooding' does not pass as 'flood'; and only the three
+// standing modes are accepted, for the reason autoReplyModeName gives. 'out' is
+// left alone unless a whole valid token was found.
+static inline bool autoReplyParseModeName(const char* arg, uint8_t* out) {
+  if (arg == NULL || out == NULL) return false;
+
+  while (*arg == ' ') arg++;
+  size_t len = 0;
+  while (arg[len] && arg[len] != ' ' && arg[len] != '\r' && arg[len] != '\n') len++;
+
+  static const uint8_t standing[] = {
+    AUTOREPLY_MODE_FLOOD, AUTOREPLY_MODE_PRIVATE, AUTOREPLY_MODE_DIRECT,
+  };
+  for (size_t i = 0; i < sizeof(standing); i++) {
+    const char* name = autoReplyModeName(standing[i]);
+    if (len == strlen(name) && strncasecmp(arg, name, len) == 0) {
+      *out = standing[i];
+      return true;
+    }
+  }
+  return false;
+}
+
 // A request from further away than 'max_hops' is ignored. Answering it means
 // flooding, and every repeater that heard it floods a reply of its own, so this is
 // the setting that bounds what one 'test' costs the mesh.

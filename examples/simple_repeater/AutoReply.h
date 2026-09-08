@@ -46,6 +46,11 @@
  * Every repeater in range answers the same trigger, so requests from further away than
  * 'autoreply.hops' are ignored, replies are rate limited per sender and in total, and
  * are staggered by a random delay.
+ *
+ * How a reply is sent is the requester's choice first and the node's second: a
+ * request may name a mode (see AutoReplyLogic.h), and one that names none is answered
+ * in the mode set with 'set autoreply.mode' -- flood, the group text every node sends
+ * today, or private/direct, a text message to the requester alone.
  */
 class AutoReply {
   FILESYSTEM* _fs;
@@ -55,6 +60,7 @@ class AutoReply {
   bool _direct_flood;           // flood the answer to a request that arrived direct
   uint8_t _delay_factor;        // multiplier on the radio retransmit delay
   char _region[AUTOREPLY_MAX_REGION + 1];   // scope for the reply, empty = mirror the request
+  uint8_t _mode;                // how a request that names no mode is answered
   bool _ready;
   mesh::GroupChannel _channel;
   RateLimiter _limiter;
@@ -84,6 +90,10 @@ public:
   bool directFlood() const { return _direct_flood; }
   uint8_t delayFactor() const { return _delay_factor; }
   const char* replyRegion() const { return _region; }
+  /**
+   * \brief  The standing reply mode, for a request that names none (AUTOREPLY_MODE_*).
+   */
+  uint8_t mode() const { return _mode; }
 
   /**
    * \brief  The derived '#test-<iata>' channel, for originating a probe on it.
