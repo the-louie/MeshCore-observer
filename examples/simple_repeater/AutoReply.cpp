@@ -387,6 +387,29 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
     return 0;
   }
 
+  int reply_len = buildReport(req, node_name, rssi, timestamp, request.sender,
+                              request.sender_len, request.id, request.id_len, dest);
+
+  // A private mode was resolved only if the request carried a key, so the decode
+  // cannot fail on length; the key's characters were checked when it was parsed.
+  target->mode = mode;
+  if (mode != AUTOREPLY_MODE_FLOOD) {
+    mesh::Utils::fromHex(target->pubkey, PUB_KEY_SIZE, request.pubkey_hex);
+  }
+
+  MESH_DEBUG_PRINTLN("AutoReply: replying '%s' (%s)", (const char *) &dest[5],
+                     autoReplyModeName(mode));
+  return reply_len;
+}
+
+// The report itself: what this node heard, for whoever asked. One body for every
+// path a request can take, so a private answer says exactly what a channel one
+// would, and the two measurements compare.
+int AutoReply::buildReport(const mesh::Packet* req, const char* node_name, float rssi,
+                           uint32_t timestamp, const char* who_name, size_t who_len,
+                           const char* id, size_t id_len, uint8_t* dest) {
+  uint8_t hop_count = req->getPathHashCount();
+
   // the repeaters this request came through (flood routing appends each hop)
   char path_hex[MAX_PATH_HASHES_SHOWN * 9 + 4];
   uint8_t hash_size = req->getPathHashSize();
@@ -410,9 +433,9 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
 
   // bounded, as the name and the path can both be long
   char who[AUTOREPLY_MAX_SENDER + 4];
-  if (request.sender_len > 0) {
-    int n = min((int)request.sender_len, AUTOREPLY_MAX_SENDER);
-    snprintf(who, sizeof(who), "[%.*s] ", n, request.sender);
+  if (who_len > 0) {
+    int n = min((int)who_len, AUTOREPLY_MAX_SENDER);
+    snprintf(who, sizeof(who), "[%.*s] ", n, who_name);
   } else {
     who[0] = 0;
   }
@@ -421,8 +444,8 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   // provoked it. With reply delays measured in minutes, arrival time can no longer
   // do that job.
   char tag[AUTOREPLY_ID_LEN + 3];
-  if (request.id != NULL) {
-    snprintf(tag, sizeof(tag), "#%.*s ", (int)request.id_len, request.id);
+  if (id != NULL) {
+    snprintf(tag, sizeof(tag), "#%.*s ", (int)id_len, id);
   } else {
     tag[0] = 0;
   }
@@ -435,14 +458,36 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
   char* out = (char *) &dest[5];
   snprintf(out, AUTOREPLY_MAX_TEXT, "%s: %s%sSNR %s RSSI %d %dh %s", node_name, who, tag,
            StrHelper::ftoa(req->getSNR()), (int)rssi, (uint32_t)hop_count, path_hex);
-
-  // A private mode was resolved only if the request carried a key, so the decode
-  // cannot fail on length; the key's characters were checked when it was parsed.
-  target->mode = mode;
-  if (mode != AUTOREPLY_MODE_FLOOD) {
-    mesh::Utils::fromHex(target->pubkey, PUB_KEY_SIZE, request.pubkey_hex);
-  }
-
-  MESH_DEBUG_PRINTLN("AutoReply: replying '%s' (%s)", out, autoReplyModeName(mode));
   return 5 + strlen(out);
+}
+
+// A private test request: the same report, to whoever's key asked for it. The
+// requester is named in the brackets by the leading bytes of that key, since a
+// key is what the packet carries and nobody can type somebody else's. Gated by
+// its own switch and charged to its own budget; a request refused by either gets
+// nothing back.
+int AutoReply::buildPrivateReply(const mesh::Packet* req, const mesh::Identity& sender,
+                                 const uint8_t* body, size_t len, const char* node_name,
+                                 float rssi, uint32_t timestamp, uint8_t* dest) {
+  if (!_enabled || !_ready || !_private) return 0;
+
+  char text[AUTOREPLY_MAX_TEXT];
+  size_t text_len = min(len, sizeof(text) - 1);
+  memcpy(text, body, text_len);
+  text[text_len] = 0;
+
+  const char* id;
+  size_t id_len;
+  if (!autoReplyParsePrivateTest(text, AUTOREPLY_KEYWORD, &id, &id_len)) {
+    MESH_DEBUG_PRINTLN("AutoReply: private request is not the keyword - got '%s'", text);
+    return 0;
+  }
+  if (!privateAllowed(sender.pub_key, timestamp)) return 0;
+
+  char who[AUTOREPLY_PRIVATE_WHO * 2 + 1];
+  mesh::Utils::toHex(who, sender.pub_key, AUTOREPLY_PRIVATE_WHO);
+  int reply_len = buildReport(req, node_name, rssi, timestamp, who, strlen(who), id, id_len,
+                              dest);
+  MESH_DEBUG_PRINTLN("AutoReply: private reply '%s'", (const char *) &dest[5]);
+  return reply_len;
 }

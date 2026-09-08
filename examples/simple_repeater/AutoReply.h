@@ -24,6 +24,8 @@
 #define AUTOREPLY_DELAY_MAX   120
 #define AUTOREPLY_DELAY_DEF   4
 #define AUTOREPLY_MAX_PAYLOAD (5 + AUTOREPLY_MAX_TEXT)   // timestamp + flags + text
+// how many leading bytes of a requester's key name it in a private reply's brackets
+#define AUTOREPLY_PRIVATE_WHO 4
 
 // how many replies this repeater will send in total, per AUTOREPLY_WINDOW_SECS
 #define AUTOREPLY_MAX_REPLIES 10
@@ -84,6 +86,9 @@ class AutoReply {
   void refreshChannel(const char* iata);
   void load();
   void save();
+  int buildReport(const mesh::Packet* req, const char* node_name, float rssi,
+                  uint32_t timestamp, const char* who_name, size_t who_len,
+                  const char* id, size_t id_len, uint8_t* dest);
 
 public:
   AutoReply();
@@ -165,4 +170,16 @@ public:
   int buildReply(const mesh::Packet* req, const uint8_t* data, size_t len,
                  const char* node_name, float rssi, uint32_t timestamp, uint8_t* dest,
                  AutoReplyTarget* target);
+
+  /**
+   * \brief  Test the body of a private (anonymous) request for the trigger, and build
+   *         the same report for its sender.
+   * \param  sender  the key the request came from and the reply goes back to
+   * \param  body  the request text after the sub-type byte
+   * \param  dest  OUT - reply payload, needs AUTOREPLY_MAX_PAYLOAD bytes
+   * \returns  length of the payload, or 0 to send nothing
+   */
+  int buildPrivateReply(const mesh::Packet* req, const mesh::Identity& sender,
+                        const uint8_t* body, size_t len, const char* node_name, float rssi,
+                        uint32_t timestamp, uint8_t* dest);
 };

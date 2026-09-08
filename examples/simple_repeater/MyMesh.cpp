@@ -60,6 +60,7 @@
 #define ANON_REQ_TYPE_REGIONS      0x01
 #define ANON_REQ_TYPE_OWNER        0x02
 #define ANON_REQ_TYPE_BASIC        0x03   // just remote clock
+#define ANON_REQ_TYPE_TEST         0x04   // a private test request: the auto-reply report, to the sender alone
 
 #define CLI_REPLY_DELAY_MILLIS      600
 
@@ -250,6 +251,16 @@ uint8_t MyMesh::handleAnonClockReq(const mesh::Identity& sender, uint32_t sender
     return 9;   // reply length
   }
   return 0;
+}
+
+// The request body is the text alone; it carries no reply path, so a direct request
+// is answered with a flooded datagram and a flooded one by path-return. The report
+// is the channel one, built by the same code, for whoever's key asked.
+uint8_t MyMesh::handleAnonTestReq(mesh::Packet* packet, const mesh::Identity& sender,
+                                  const uint8_t* body, size_t len) {
+  return auto_reply.buildPrivateReply(packet, sender, body, len, _prefs.node_name,
+                                      radio_driver.getLastRSSI(),
+                                      getRTCClock()->getCurrentTimeUnique(), reply_data);
 }
 
 int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload, size_t payload_len) {
@@ -694,6 +705,10 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
       reply_len = handleAnonOwnerReq(sender, timestamp, &data[5]);
     } else if (data[4] == ANON_REQ_TYPE_BASIC && packet->isRouteDirect()) {
       reply_len = handleAnonClockReq(sender, timestamp, &data[5]);
+    } else if (data[4] == ANON_REQ_TYPE_TEST) {
+      // Flood or direct: a requester that has no path to this node floods, and the
+      // reply block below returns a path with the answer, as it does for a login.
+      reply_len = handleAnonTestReq(packet, sender, &data[5], len - 5);
     } else {
       reply_len = 0;  // unknown/invalid request type
     }
