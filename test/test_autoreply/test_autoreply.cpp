@@ -214,6 +214,79 @@ TEST(ParseRequest, CorrelationIdIsCaseInsensitiveHex) {
   EXPECT_EQ(std::string("A1B2C3D4"), std::string(r.id, r.id_len));
 }
 
+// ---- the mode letter: how the requester asks to be answered ----------------
+
+TEST(ParseRequest, NoModeMeansTheNodeDefault) {
+  // Both older forms keep working unchanged, and neither names a mode: the node
+  // answers the way it is configured to. This is the transition guarantee -- a
+  // requester that knows nothing about modes is answered exactly as before.
+  const char* older[] = { "Louie: test", "Louie: test a1b2c3d4" };
+  for (const char* s : older) {
+    char text[128];
+    copyText(text, sizeof(text), s);
+    AutoReplyRequest r = autoReplyParseRequest(text, "test");
+    EXPECT_TRUE(r.is_trigger) << s;
+    EXPECT_EQ(AUTOREPLY_MODE_DEFAULT, r.mode) << s;
+  }
+}
+
+TEST(ParseRequest, ModeLetterAfterTheId) {
+  struct { const char* letter; uint8_t mode; } cases[] = {
+    { "F", AUTOREPLY_MODE_FLOOD }, { "P", AUTOREPLY_MODE_PRIVATE },
+    { "D", AUTOREPLY_MODE_DIRECT }, { "S", AUTOREPLY_MODE_SILENT },
+  };
+  for (const auto& c : cases) {
+    char text[128];
+    copyText(text, sizeof(text), (std::string("Louie: test a1b2c3d4 ") + c.letter).c_str());
+    AutoReplyRequest r = autoReplyParseRequest(text, "test");
+    ASSERT_TRUE(r.is_trigger) << c.letter;
+    EXPECT_EQ(c.mode, r.mode) << c.letter;
+    EXPECT_EQ(std::string("a1b2c3d4"), std::string(r.id, r.id_len)) << c.letter;
+  }
+}
+
+TEST(ParseRequest, ModeLetterWithoutAnId) {
+  // 'F' and 'D' are hex digits, so a lone one must read as a mode and not as a
+  // one-character id: an id is exactly AUTOREPLY_ID_LEN characters, never shorter.
+  const char* letters[] = { "F", "D", "P", "S" };
+  for (const char* l : letters) {
+    char text[128];
+    copyText(text, sizeof(text), (std::string("Louie: test ") + l).c_str());
+    AutoReplyRequest r = autoReplyParseRequest(text, "test");
+    EXPECT_TRUE(r.is_trigger) << l;
+    EXPECT_EQ(nullptr, r.id) << l;
+    EXPECT_NE(AUTOREPLY_MODE_DEFAULT, r.mode) << l;
+  }
+}
+
+TEST(ParseRequest, ModeLetterIsCaseInsensitive) {
+  char text[128];
+  copyText(text, sizeof(text), "Louie: test a1b2c3d4 s");
+  AutoReplyRequest r = autoReplyParseRequest(text, "test");
+  ASSERT_TRUE(r.is_trigger);
+  EXPECT_EQ(AUTOREPLY_MODE_SILENT, r.mode);
+}
+
+TEST(ParseRequest, ModeMustBeExactlyOneKnownLetter) {
+  // The strict-match discipline holds for the third part as it does for the id:
+  // 'test a1b2c3d4 x' is chat, and so is anything with a second letter or a second
+  // space. A reply costs airtime; a near-miss must not spend it.
+  const char* bad[] = {
+    "Louie: test a1b2c3d4 X",     // not a mode letter
+    "Louie: test a1b2c3d4 SS",    // two letters
+    "Louie: test a1b2c3d4  S",    // two spaces
+    "Louie: test a1b2c3d4 S x",   // trailing text
+    "Louie: test S S",            // a mode is not an id
+    "Louie: test SS",
+    "Louie: test 123 S",          // a short id is chat, and stays chat with a mode
+  };
+  for (const char* s : bad) {
+    char text[128];
+    copyText(text, sizeof(text), s);
+    EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << s;
+  }
+}
+
 TEST(ParseRequest, AReplyCanNeverTriggerAReply) {
   // The invariant the whole-string match used to guarantee for free. A reply body
   // begins with the bracketed requester name, or with "SNR" when there was none,
@@ -225,6 +298,8 @@ TEST(ParseRequest, AReplyCanNeverTriggerAReply) {
     "SE-JKG-Rep: SNR 1.0 RSSI -100 0h direct",
     "SE-JKG-Rep: [test] SNR 1.0 RSSI -100 0h direct",
     "SE-JKG-Rep: [test a1b2c3d4] SNR 1.0 RSSI -100 0h direct",
+    "SE-JKG-Rep: [test a1b2c3d4 S] SNR 1.0 RSSI -100 0h direct",
+    "SE-JKG-Rep: [test S] SNR 1.0 RSSI -100 0h direct",
   };
   for (const char* s : replies) {
     char text[256];
@@ -481,6 +556,17 @@ TEST(TriggerCommand, TheIdGrammarIsTheSameOneARequestUses) {
   EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3D4E", "test", &id, &id_len)); // 9
   EXPECT_FALSE(autoReplyParseTrigger("trigger test ZZZZZZZZ", "test", &id, &id_len));  // not hex
   EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3D4 x", "test", &id, &id_len));
+}
+
+TEST(TriggerCommand, ACallerWithNoUseForAModeRejectsOne) {
+  // The trigger command parses without a mode out-param today. A request naming
+  // a mode must then be a non-trigger, and carry nothing out -- never a trigger
+  // with the mode quietly dropped, which would probe in a mode nobody chose.
+  const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test A1B2C3D4 S", "test", &id, &id_len));
+  EXPECT_EQ(NULL, id);
+  EXPECT_EQ(0u, id_len);
+  EXPECT_FALSE(autoReplyParseTrigger("trigger test S", "test", &id, &id_len));
 }
 
 TEST(TriggerCommand, IsCaseInsensitiveLikeTheKeywordItself) {

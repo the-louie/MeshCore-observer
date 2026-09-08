@@ -86,6 +86,36 @@ static inline bool autoReplySenderAllowed(AutoReplySender* senders, uint8_t coun
 // non-trigger rather than a shorter id.
 #define AUTOREPLY_ID_LEN  8
 
+// How a request asks to be answered. A requester picks one with a single letter
+// after the id; a request that names none takes the node's configured default,
+// which is what AUTOREPLY_MODE_DEFAULT stands for in a parsed request.
+//
+// FLOOD is the reply every node makes today, a group text flooded on the channel.
+// PRIVATE and DIRECT are a text message addressed to the requester alone -- the
+// first flooded so it finds them wherever they are, the second sent down a known
+// return path. SILENT asks for no reply at all: the node still hears the request
+// and its observer uplink still reports it, so a probe that wants only "who heard
+// me" costs the mesh nothing but its own transmission.
+enum {
+  AUTOREPLY_MODE_DEFAULT = 0,
+  AUTOREPLY_MODE_FLOOD,
+  AUTOREPLY_MODE_PRIVATE,
+  AUTOREPLY_MODE_DIRECT,
+  AUTOREPLY_MODE_SILENT,
+};
+
+// The letter a requester types, either case. Anything else is DEFAULT, which the
+// trigger parser treats as "not a mode token" rather than as a choice.
+static inline uint8_t autoReplyModeFromLetter(char c) {
+  switch (tolower((unsigned char)c)) {
+    case 'f': return AUTOREPLY_MODE_FLOOD;
+    case 'p': return AUTOREPLY_MODE_PRIVATE;
+    case 'd': return AUTOREPLY_MODE_DIRECT;
+    case 's': return AUTOREPLY_MODE_SILENT;
+    default:  return AUTOREPLY_MODE_DEFAULT;
+  }
+}
+
 // A group text, split into who sent it and whether it asked for a reply. 'sender',
 // 'message' and 'id' point into the text buffer passed to autoReplyParseRequest().
 struct AutoReplyRequest {
@@ -95,24 +125,34 @@ struct AutoReplyRequest {
   const char* message;
   const char* id;        // NULL for a bare keyword
   size_t id_len;
+  uint8_t mode;          // AUTOREPLY_MODE_DEFAULT unless the request named one
 };
 
-// Does the message ask for a reply, and does it carry a correlation id?
+// Does the message ask for a reply, and does it carry a correlation id or a mode?
 //
-// Two forms are accepted: the bare keyword, and the keyword followed by one space
-// and exactly AUTOREPLY_ID_LEN hex characters. **The bare form must keep working
-// indefinitely.** Flashing this fleet takes months, so probes stay bare until
-// adoption is high; a firmware that only answered the id form would silently drop
-// every un-flashed node out of the measurement, and those are exactly the nodes
-// whose connectivity is least understood.
+// The forms accepted are the bare keyword, the keyword and exactly AUTOREPLY_ID_LEN
+// hex characters, and either of those followed by one mode letter -- each part
+// separated by a single space. **The bare form must keep working indefinitely.**
+// Flashing this fleet takes months, so probes stay bare until adoption is high; a
+// firmware that only answered the id form would silently drop every un-flashed node
+// out of the measurement, and those are exactly the nodes whose connectivity is
+// least understood.
 //
-// The tail is matched strictly -- one space, then hex, then end of string. Anything
-// looser ('test me', 'test 123', trailing text) stays a non-trigger, which is what
-// keeps ordinary chat on the channel from costing everyone airtime.
+// The tail is matched strictly -- one space between parts, then end of string.
+// Anything looser ('test me', 'test 123', a second letter, trailing text) stays a
+// non-trigger, which is what keeps ordinary chat on the channel from costing
+// everyone airtime. A mode letter and an id cannot be confused: an id is exactly
+// eight hex digits, and a mode is exactly one letter.
+//
+// 'mode' may be NULL for a caller that has no use for one. Such a caller keeps
+// exactly the two older forms: a request that names a mode is a non-trigger there,
+// never a trigger with the mode quietly dropped.
 static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
-                                         const char** id, size_t* id_len) {
+                                         const char** id, size_t* id_len,
+                                         uint8_t* mode = NULL) {
   *id = NULL;
   *id_len = 0;
+  if (mode) *mode = AUTOREPLY_MODE_DEFAULT;
   if (msg == NULL || keyword == NULL) return false;
 
   size_t klen = strlen(keyword);
@@ -123,10 +163,20 @@ static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
   const char* tail = msg + klen + 1;
   size_t n = 0;
   while (n < AUTOREPLY_ID_LEN && isxdigit((unsigned char)tail[n])) n++;
-  if (n != AUTOREPLY_ID_LEN || tail[n] != 0) return false;
+  if (n == AUTOREPLY_ID_LEN && (tail[n] == 0 || tail[n] == ' ')) {
+    *id = tail;
+    *id_len = n;
+    if (tail[n] == 0) return true;                 // keyword and id
+    tail += n + 1;
+  }
 
-  *id = tail;
-  *id_len = n;
+  uint8_t m = autoReplyModeFromLetter(tail[0]);
+  if (mode == NULL || m == AUTOREPLY_MODE_DEFAULT || tail[1] != 0) {
+    *id = NULL;                                    // a non-trigger carries nothing
+    *id_len = 0;
+    return false;
+  }
+  *mode = m;
   return true;
 }
 
@@ -208,10 +258,10 @@ static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char*
 //
 // A reply can never trigger a reply: a reply body begins with the bracketed
 // requester name, or with "SNR" when there was none, and neither can match the
-// keyword. Widening the match to accept a correlation id does not change that,
-// and test/test_autoreply pins it.
+// keyword. Widening the match to accept a correlation id and a mode letter does not
+// change that, and test/test_autoreply pins it.
 static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* keyword) {
-  AutoReplyRequest req = { false, text, 0, text, NULL, 0 };
+  AutoReplyRequest req = { false, text, 0, text, NULL, 0, AUTOREPLY_MODE_DEFAULT };
   if (text == NULL || keyword == NULL) return req;
 
   char* msg = strstr(text, ": ");
@@ -228,7 +278,7 @@ static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* key
   *end = 0;
 
   req.message = msg;
-  req.is_trigger = autoReplyMatchTrigger(msg, keyword, &req.id, &req.id_len);
+  req.is_trigger = autoReplyMatchTrigger(msg, keyword, &req.id, &req.id_len, &req.mode);
   return req;
 }
 
