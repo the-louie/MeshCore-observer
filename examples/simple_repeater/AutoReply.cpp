@@ -319,6 +319,16 @@ int AutoReply::buildReply(const mesh::Packet* req, const uint8_t* data, size_t l
     return 0;
   }
 
+  // A request that asks for silence is answered by the observer uplink alone: the
+  // reception is reported over MQTT whatever happens here, and nothing goes on
+  // the air. It spends no reply budget, since there is no reply.
+  uint8_t mode = autoReplyResolveMode(request.mode, _mode, request.pubkey_hex != NULL);
+  if (mode == AUTOREPLY_MODE_SILENT) {
+    MESH_DEBUG_PRINTLN("AutoReply: '%.*s' asked for no reply", (int)request.sender_len,
+                       request.sender);
+    return 0;
+  }
+
   // Per-sender first, so someone retrying cannot spend everyone else's share of
   // the global budget. Only real triggers are charged against either limit.
   uint32_t sender_id = autoReplySenderId(request.sender, request.sender_len);
