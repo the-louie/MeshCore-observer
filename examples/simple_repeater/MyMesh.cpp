@@ -1075,16 +1075,21 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
 // are answering the same question they always answer and the measurements
 // compare. The channel is always derived from the region, never a literal: a
 // probe that went to a hardcoded channel would be measuring someone else's mesh.
-bool MyMesh::triggerProbe(const char* id, size_t id_len, char* reply) {
+bool MyMesh::triggerProbe(const char* id, size_t id_len, uint8_t mode, char* reply) {
   mesh::GroupChannel channel;
   if (!auto_reply.probeChannel(autoReplyRegion(), &channel)) {
     strcpy(reply, "Err - no region set, no channel to probe on");
     return false;
   }
 
+  // A private reply comes back to whoever's key the probe carries, and the probe
+  // is ours, so that is our own.
+  char self_hex[PUB_KEY_SIZE * 2 + 1];
+  mesh::Utils::toHex(self_hex, self_id.pub_key, PUB_KEY_SIZE);
+
   char body[AUTOREPLY_MAX_PAYLOAD];
   size_t body_len = autoReplyBuildProbe(body, sizeof(body), _prefs.node_name,
-                                        AUTOREPLY_KEYWORD, id, id_len);
+                                        AUTOREPLY_KEYWORD, id, id_len, mode, self_hex);
   if (body_len == 0) {
     strcpy(reply, "Err - could not build probe");
     return false;
@@ -1714,6 +1719,7 @@ void MyMesh::buildStatsJson(char* buf, size_t buf_size) {
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
   const char* trigger_id = NULL;
   size_t trigger_id_len = 0;
+  uint8_t trigger_mode = AUTOREPLY_MODE_DEFAULT;
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
       region_map = temp_map;  // copy over the temp instance as new current map
@@ -1835,8 +1841,9 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 #endif
   } else if (auto_reply.handleCommand(autoReplyRegion(), command, reply)) {
     // reply already filled in
-  } else if (autoReplyParseTrigger(command, AUTOREPLY_KEYWORD, &trigger_id, &trigger_id_len)) {
-    triggerProbe(trigger_id, trigger_id_len, reply);
+  } else if (autoReplyParseTrigger(command, AUTOREPLY_KEYWORD, &trigger_id, &trigger_id_len,
+                                   &trigger_mode)) {
+    triggerProbe(trigger_id, trigger_id_len, trigger_mode, reply);
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

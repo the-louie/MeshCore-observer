@@ -116,6 +116,18 @@ static inline uint8_t autoReplyModeFromLetter(char c) {
   }
 }
 
+// The letter for a mode, for a probe this node originates; 0 for DEFAULT, which
+// names nothing and so has no letter to send.
+static inline char autoReplyModeLetter(uint8_t mode) {
+  switch (mode) {
+    case AUTOREPLY_MODE_FLOOD:   return 'F';
+    case AUTOREPLY_MODE_PRIVATE: return 'P';
+    case AUTOREPLY_MODE_DIRECT:  return 'D';
+    case AUTOREPLY_MODE_SILENT:  return 'S';
+    default:                     return 0;
+  }
+}
+
 // A group text, split into who sent it and whether it asked for a reply. 'sender',
 // 'message' and 'id' point into the text buffer passed to autoReplyParseRequest().
 struct AutoReplyRequest {
@@ -220,30 +232,40 @@ static inline uint8_t autoReplyResolveMode(uint8_t requested, uint8_t node_defau
 // for the same reason. A node inventing its own id would produce a number nobody
 // asked for and nobody can match.
 //
-// Reuses autoReplyMatchTrigger for the tail so the accepted id grammar is defined
-// once: whatever a node accepts in a request, it accepts in a trigger.
+// Reuses autoReplyMatchTrigger for the tail so the accepted id and mode grammar is
+// defined once: whatever a node accepts in a request, it accepts in a trigger. A
+// key is the one thing a trigger never carries -- the probe's requester is this
+// node, and it knows its own key -- so a command with one is refused.
 static inline bool autoReplyParseTrigger(const char* command, const char* keyword,
-                                         const char** id, size_t* id_len) {
+                                         const char** id, size_t* id_len,
+                                         uint8_t* mode = NULL) {
   *id = NULL;
   *id_len = 0;
+  if (mode) *mode = AUTOREPLY_MODE_DEFAULT;
   if (command == NULL || keyword == NULL) return false;
 
   static const char PREFIX[] = "trigger ";
   const size_t plen = sizeof(PREFIX) - 1;
   if (strncasecmp(command, PREFIX, plen) != 0) return false;
 
-  return autoReplyMatchTrigger(command + plen, keyword, id, id_len);
+  return autoReplyMatchTrigger(command + plen, keyword, id, id_len, mode);
 }
 
-// Build the probe body: the keyword alone, or the keyword and the echoed id.
+// Build the probe body: the keyword alone, or the keyword and the echoed id, and
+// after either a mode letter and, for a private mode, the key the reply should
+// come back to -- this node's own.
 //
 // This is the same text a person sends by hand, deliberately: the probe has to be
 // indistinguishable from an ordinary request, or the nodes that answer it would be
-// answering something else and the measurement would not compare.
+// answering something else and the measurement would not compare. A probe names
+// no mode unless asked to, for the reason a request does not: an un-flashed
+// repeater matches the bare forms only.
 //
 // Returns the length written, or 0 if it would not fit.
 static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char* sender,
-                                         const char* keyword, const char* id, size_t id_len) {
+                                         const char* keyword, const char* id, size_t id_len,
+                                         uint8_t mode = AUTOREPLY_MODE_DEFAULT,
+                                         const char* pubkey_hex = NULL) {
   if (out == NULL || out_size == 0 || keyword == NULL) return 0;
   out[0] = 0;
 
@@ -257,9 +279,14 @@ static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char*
   // `SNR 7.75 RSSI -106 1h 70` where a client's probe draws
   // `[SE-JKG-LouHome-A] SNR ...`. The probe has to look like the one a person
   // sends, prefix included, or it is not measuring the same thing.
+  char letter = autoReplyModeLetter(mode);
+  bool keyed = letter && (mode == AUTOREPLY_MODE_PRIVATE || mode == AUTOREPLY_MODE_DIRECT)
+               && pubkey_hex != NULL;
   size_t slen = (sender != NULL && sender[0] != 0) ? strlen(sender) : 0;
   size_t klen = strlen(keyword);
-  size_t need = (slen ? slen + 2 : 0) + klen + (id != NULL && id_len > 0 ? 1 + id_len : 0);
+  size_t hlen = keyed ? strlen(pubkey_hex) : 0;
+  size_t need = (slen ? slen + 2 : 0) + klen + (id != NULL && id_len > 0 ? 1 + id_len : 0)
+                + (letter ? 2 : 0) + (keyed ? 1 + hlen : 0);
   if (need == 0 || need + 1 > out_size) return 0;   // never truncate a probe
 
   size_t n = 0;
@@ -275,6 +302,15 @@ static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char*
     out[n++] = ' ';
     memcpy(out + n, id, id_len);
     n += id_len;
+  }
+  if (letter) {
+    out[n++] = ' ';
+    out[n++] = letter;
+  }
+  if (keyed) {
+    out[n++] = ' ';
+    memcpy(out + n, pubkey_hex, hlen);
+    n += hlen;
   }
   out[n] = 0;
   return n;

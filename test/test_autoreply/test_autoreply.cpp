@@ -765,6 +765,28 @@ TEST(TriggerCommand, ACallerWithNoUseForAModeRejectsOne) {
   EXPECT_FALSE(autoReplyParseTrigger("trigger test S", "test", &id, &id_len));
 }
 
+TEST(TriggerCommand, CarriesAModeWhenAskedFor) {
+  const char* id = NULL; size_t id_len = 0; uint8_t mode = AUTOREPLY_MODE_DEFAULT;
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test A1B2C3D4 S", "test", &id, &id_len, &mode));
+  EXPECT_EQ(AUTOREPLY_MODE_SILENT, mode);
+  EXPECT_EQ(std::string("A1B2C3D4"), std::string(id, id_len));
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test p", "test", &id, &id_len, &mode));
+  EXPECT_EQ(AUTOREPLY_MODE_PRIVATE, mode);
+  EXPECT_EQ(NULL, id);
+  // and none when it was not
+  EXPECT_TRUE(autoReplyParseTrigger("trigger test", "test", &id, &id_len, &mode));
+  EXPECT_EQ(AUTOREPLY_MODE_DEFAULT, mode);
+}
+
+TEST(TriggerCommand, NeverCarriesAKey) {
+  // The probe's requester is this node, which knows its own key; a command that
+  // tries to supply one is refused rather than trusted.
+  const char* id = NULL; size_t id_len = 0; uint8_t mode = AUTOREPLY_MODE_DEFAULT;
+  std::string cmd = std::string("trigger test A1B2C3D4 P ") + KEY;
+  EXPECT_FALSE(autoReplyParseTrigger(cmd.c_str(), "test", &id, &id_len, &mode));
+  EXPECT_EQ(NULL, id);
+}
+
 TEST(TriggerCommand, IsCaseInsensitiveLikeTheKeywordItself) {
   // The trigger word is documented case-insensitive, so the command that carries
   // it is too -- a requester should not have to guess which half cares.
@@ -802,6 +824,56 @@ TEST(BuildProbe, BareAndIdForms) {
 
   EXPECT_EQ(13u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8));
   EXPECT_EQ(std::string("test A1B2C3D4"), std::string(out));
+}
+
+TEST(BuildProbe, NamesAModeOnlyWhenAsked) {
+  // The bare and id forms are untouched by the mode work: a probe that named a
+  // mode by default would be one an un-flashed repeater ignores.
+  char out[64];
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8, AUTOREPLY_MODE_DEFAULT, KEY);
+  EXPECT_EQ(std::string("test A1B2C3D4"), std::string(out));
+
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8, AUTOREPLY_MODE_SILENT);
+  EXPECT_EQ(std::string("test A1B2C3D4 S"), std::string(out));
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0, AUTOREPLY_MODE_FLOOD);
+  EXPECT_EQ(std::string("test F"), std::string(out));
+}
+
+TEST(BuildProbe, APrivateModeCarriesTheKeyAndTheOthersDoNot) {
+  char out[160];
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8, AUTOREPLY_MODE_PRIVATE, KEY);
+  EXPECT_EQ(std::string("test A1B2C3D4 P ") + KEY, std::string(out));
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0, AUTOREPLY_MODE_DIRECT, KEY);
+  EXPECT_EQ(std::string("test D ") + KEY, std::string(out));
+  // F and S have nowhere to send a key, and the parser would refuse one.
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0, AUTOREPLY_MODE_FLOOD, KEY);
+  EXPECT_EQ(std::string("test F"), std::string(out));
+  autoReplyBuildProbe(out, sizeof(out), NULL, "test", NULL, 0, AUTOREPLY_MODE_SILENT, KEY);
+  EXPECT_EQ(std::string("test S"), std::string(out));
+}
+
+TEST(BuildProbe, ARealRepeaterParsesEveryModeWeSend) {
+  // Round trip through the request parser, which is what the receiving node runs.
+  struct { uint8_t mode; bool keyed; } cases[] = {
+    { AUTOREPLY_MODE_FLOOD, false }, { AUTOREPLY_MODE_PRIVATE, true },
+    { AUTOREPLY_MODE_DIRECT, true }, { AUTOREPLY_MODE_SILENT, false },
+  };
+  for (const auto& c : cases) {
+    char body[160];
+    autoReplyBuildProbe(body, sizeof(body), "SE-JKG-Rep", "test", "A1B2C3D4", 8, c.mode, KEY);
+    AutoReplyRequest r = autoReplyParseRequest(body, "test");
+    ASSERT_TRUE(r.is_trigger) << body;
+    EXPECT_EQ(c.mode, r.mode) << body;
+    EXPECT_EQ(c.keyed, r.pubkey_hex != NULL) << body;
+    if (c.keyed) EXPECT_EQ(std::string(KEY), std::string(r.pubkey_hex));
+  }
+}
+
+TEST(BuildProbe, RefusesRatherThanTruncatingAKey) {
+  char out[70];   // room for "test A1B2C3D4 P " but not the 64-character key
+  EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), NULL, "test", "A1B2C3D4", 8,
+                                    AUTOREPLY_MODE_PRIVATE, KEY));
+  EXPECT_EQ(std::string(""), std::string(out));
 }
 
 TEST(BuildProbe, ProbeBodyIsExactlyWhatAPersonWouldSend) {
