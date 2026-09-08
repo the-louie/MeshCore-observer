@@ -660,6 +660,23 @@ TEST(ParsePrivateTest, NoNamePrefixToSplit) {
   EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
 }
 
+TEST(ParsePrivateTest, AReplyCanNeverBeAPrivateRequestEither) {
+  // A RESPONSE is never dispatched as a request at all -- the anon handler acts
+  // only on ANON_REQ -- but the body-level property holds too, and for the same
+  // reason as on the channel: the report begins with the node's name.
+  const char* replies[] = {
+    "SE-JKG-Rep: [AA04792D] #a1b2c3d4 SNR 1.0 RSSI -100 2h AA,BB",
+    "SE-JKG-Rep: [AA04792D] SNR 1.0 RSSI -100 0h direct",
+    "test: [AA04792D] SNR 1.0 RSSI -100 0h direct",   // a node named 'test'
+  };
+  for (const char* s : replies) {
+    char text[160];
+    const char* id = NULL; size_t id_len = 0;
+    copyText(text, sizeof(text), s);
+    EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len)) << s;
+  }
+}
+
 TEST(ParsePrivateTest, HandlesNullsAndChat) {
   char text[64];
   const char* id = NULL; size_t id_len = 0;
