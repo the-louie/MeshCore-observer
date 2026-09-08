@@ -126,33 +126,40 @@ struct AutoReplyRequest {
   const char* id;        // NULL for a bare keyword
   size_t id_len;
   uint8_t mode;          // AUTOREPLY_MODE_DEFAULT unless the request named one
+  const char* pubkey_hex; // 64 hex characters, or NULL: where a private reply goes
 };
 
 // Does the message ask for a reply, and does it carry a correlation id or a mode?
 //
 // The forms accepted are the bare keyword, the keyword and exactly AUTOREPLY_ID_LEN
 // hex characters, and either of those followed by one mode letter -- each part
-// separated by a single space. **The bare form must keep working indefinitely.**
-// Flashing this fleet takes months, so probes stay bare until adoption is high; a
-// firmware that only answered the id form would silently drop every un-flashed node
-// out of the measurement, and those are exactly the nodes whose connectivity is
-// least understood.
+// separated by a single space. A private mode (P or D) may then carry the
+// requester's public key as 64 hex characters, because a group text names its
+// sender only by an unauthenticated display name and a private reply has to be
+// addressed to a key. **The bare form must keep working indefinitely.** Flashing
+// this fleet takes months, so probes stay bare until adoption is high; a firmware
+// that only answered the id form would silently drop every un-flashed node out of
+// the measurement, and those are exactly the nodes whose connectivity is least
+// understood.
 //
 // The tail is matched strictly -- one space between parts, then end of string.
-// Anything looser ('test me', 'test 123', a second letter, trailing text) stays a
-// non-trigger, which is what keeps ordinary chat on the channel from costing
-// everyone airtime. A mode letter and an id cannot be confused: an id is exactly
-// eight hex digits, and a mode is exactly one letter.
+// Anything looser ('test me', 'test 123', a second letter, trailing text, a key
+// after F or S) stays a non-trigger, which is what keeps ordinary chat on the
+// channel from costing everyone airtime. A mode letter and an id cannot be
+// confused: an id is exactly eight hex digits, and a mode is exactly one letter.
 //
 // 'mode' may be NULL for a caller that has no use for one. Such a caller keeps
 // exactly the two older forms: a request that names a mode is a non-trigger there,
-// never a trigger with the mode quietly dropped.
+// never a trigger with the mode quietly dropped. 'pubkey_hex' likewise: a caller
+// that cannot address a private reply treats a request carrying a key as chat.
 static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
                                          const char** id, size_t* id_len,
-                                         uint8_t* mode = NULL) {
+                                         uint8_t* mode = NULL,
+                                         const char** pubkey_hex = NULL) {
   *id = NULL;
   *id_len = 0;
   if (mode) *mode = AUTOREPLY_MODE_DEFAULT;
+  if (pubkey_hex) *pubkey_hex = NULL;
   if (msg == NULL || keyword == NULL) return false;
 
   size_t klen = strlen(keyword);
@@ -171,13 +178,37 @@ static inline bool autoReplyMatchTrigger(const char* msg, const char* keyword,
   }
 
   uint8_t m = autoReplyModeFromLetter(tail[0]);
-  if (mode == NULL || m == AUTOREPLY_MODE_DEFAULT || tail[1] != 0) {
+  bool ok = mode != NULL && m != AUTOREPLY_MODE_DEFAULT;
+  if (ok && tail[1] == ' ') {
+    // Only a private reply needs an address, so only P and D may carry one.
+    bool addressable = m == AUTOREPLY_MODE_PRIVATE || m == AUTOREPLY_MODE_DIRECT;
+    ok = addressable && pubkey_hex != NULL && mqttOwnerKeyValid(tail + 2);
+    if (ok) *pubkey_hex = tail + 2;
+  } else if (ok) {
+    ok = tail[1] == 0;
+  }
+  if (!ok) {
     *id = NULL;                                    // a non-trigger carries nothing
     *id_len = 0;
     return false;
   }
   *mode = m;
   return true;
+}
+
+// The mode a reply is actually sent in, given what the request asked for and how
+// the node is configured. A request that named nothing takes the node's default.
+// A private reply needs somewhere to go: with no key to address it to, P and D
+// fall back to the flood reply rather than to silence, because a probe that goes
+// unanswered for an addressing gap looks exactly like a dead repeater.
+static inline uint8_t autoReplyResolveMode(uint8_t requested, uint8_t node_default,
+                                           bool has_pubkey) {
+  uint8_t m = requested == AUTOREPLY_MODE_DEFAULT ? node_default : requested;
+  if (m == AUTOREPLY_MODE_DEFAULT) m = AUTOREPLY_MODE_FLOOD;
+  if ((m == AUTOREPLY_MODE_PRIVATE || m == AUTOREPLY_MODE_DIRECT) && !has_pubkey) {
+    return AUTOREPLY_MODE_FLOOD;
+  }
+  return m;
 }
 
 // Parse `trigger <keyword>` / `trigger <keyword> <8 hex>`, the command a signed
@@ -261,7 +292,7 @@ static inline size_t autoReplyBuildProbe(char* out, size_t out_size, const char*
 // keyword. Widening the match to accept a correlation id and a mode letter does not
 // change that, and test/test_autoreply pins it.
 static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* keyword) {
-  AutoReplyRequest req = { false, text, 0, text, NULL, 0, AUTOREPLY_MODE_DEFAULT };
+  AutoReplyRequest req = { false, text, 0, text, NULL, 0, AUTOREPLY_MODE_DEFAULT, NULL };
   if (text == NULL || keyword == NULL) return req;
 
   char* msg = strstr(text, ": ");
@@ -278,7 +309,8 @@ static inline AutoReplyRequest autoReplyParseRequest(char* text, const char* key
   *end = 0;
 
   req.message = msg;
-  req.is_trigger = autoReplyMatchTrigger(msg, keyword, &req.id, &req.id_len, &req.mode);
+  req.is_trigger = autoReplyMatchTrigger(msg, keyword, &req.id, &req.id_len, &req.mode,
+                                         &req.pubkey_hex);
   return req;
 }
 

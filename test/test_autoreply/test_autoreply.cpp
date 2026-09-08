@@ -287,6 +287,102 @@ TEST(ParseRequest, ModeMustBeExactlyOneKnownLetter) {
   }
 }
 
+// ---- the requester's key: where a private reply is addressed ---------------
+
+// A 32-byte key as 64 hex characters, the form `set mqtt.owner` also takes.
+static const char KEY[] =
+  "AA04792D7804529FABF230B32DC8F7FA494D1B3280F153B2215C305E4FD654DC";
+
+TEST(ParseRequest, APrivateModeMayCarryTheRequestersKey) {
+  // A group text names its sender only by a display name anyone can type, so a
+  // reply addressed to a key has to be told the key. It follows the mode letter.
+  const char* forms[] = {
+    "Louie: test a1b2c3d4 P ", "Louie: test a1b2c3d4 D ", "Louie: test P ", "Louie: test D ",
+  };
+  for (const char* f : forms) {
+    char text[192];
+    copyText(text, sizeof(text), (std::string(f) + KEY).c_str());
+    AutoReplyRequest r = autoReplyParseRequest(text, "test");
+    ASSERT_TRUE(r.is_trigger) << f;
+    ASSERT_NE(nullptr, r.pubkey_hex) << f;
+    EXPECT_EQ(std::string(KEY), std::string(r.pubkey_hex)) << f;
+  }
+}
+
+TEST(ParseRequest, APrivateModeWithoutAKeyStillTriggers) {
+  // The request is well formed; it just cannot be answered privately. Resolution
+  // (below) turns it into a flood reply rather than dropping it.
+  char text[128];
+  copyText(text, sizeof(text), "Louie: test a1b2c3d4 P");
+  AutoReplyRequest r = autoReplyParseRequest(text, "test");
+  ASSERT_TRUE(r.is_trigger);
+  EXPECT_EQ(AUTOREPLY_MODE_PRIVATE, r.mode);
+  EXPECT_EQ(nullptr, r.pubkey_hex);
+}
+
+TEST(ParseRequest, TheKeyIsExactly64HexCharacters) {
+  std::string key(KEY);
+  const std::string bad[] = {
+    "Louie: test a1b2c3d4 P " + key.substr(0, 63),      // short
+    "Louie: test a1b2c3d4 P " + key + "A",               // long
+    "Louie: test a1b2c3d4 P " + key.substr(0, 63) + "G", // not hex
+    "Louie: test a1b2c3d4 P  " + key,                    // two spaces
+    "Louie: test a1b2c3d4 P " + key + " x",              // trailing text
+  };
+  for (const std::string& s : bad) {
+    char text[192];
+    copyText(text, sizeof(text), s.c_str());
+    EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << s;
+  }
+}
+
+TEST(ParseRequest, OnlyAPrivateModeMayCarryAKey) {
+  // A flood reply and a silent one have nowhere to send a key to. A key after F or
+  // S is not a slightly odd request, it is chat.
+  const char* forms[] = { "Louie: test a1b2c3d4 F ", "Louie: test a1b2c3d4 S " };
+  for (const char* f : forms) {
+    char text[192];
+    copyText(text, sizeof(text), (std::string(f) + KEY).c_str());
+    EXPECT_FALSE(autoReplyParseRequest(text, "test").is_trigger) << f;
+  }
+}
+
+// ---- the mode a reply is actually sent in ----------------------------------
+
+TEST(ResolveMode, ARequestThatNamesNothingTakesTheNodeDefault) {
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_DEFAULT, AUTOREPLY_MODE_FLOOD, false));
+  EXPECT_EQ(AUTOREPLY_MODE_PRIVATE,
+            autoReplyResolveMode(AUTOREPLY_MODE_DEFAULT, AUTOREPLY_MODE_PRIVATE, true));
+  // An unconfigured default is the flood reply every node makes today.
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_DEFAULT, AUTOREPLY_MODE_DEFAULT, false));
+}
+
+TEST(ResolveMode, ARequestThatNamesAModeWins) {
+  EXPECT_EQ(AUTOREPLY_MODE_SILENT,
+            autoReplyResolveMode(AUTOREPLY_MODE_SILENT, AUTOREPLY_MODE_FLOOD, false));
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_FLOOD, AUTOREPLY_MODE_PRIVATE, true));
+  EXPECT_EQ(AUTOREPLY_MODE_DIRECT,
+            autoReplyResolveMode(AUTOREPLY_MODE_DIRECT, AUTOREPLY_MODE_FLOOD, true));
+}
+
+TEST(ResolveMode, APrivateReplyWithNowhereToGoFloodsInstead) {
+  // Never silence: a probe unanswered for an addressing gap looks exactly like a
+  // dead repeater, and this system exists to tell those apart.
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_PRIVATE, AUTOREPLY_MODE_FLOOD, false));
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_DIRECT, AUTOREPLY_MODE_FLOOD, false));
+  // ...including when it is the node's own default that asked for privacy.
+  EXPECT_EQ(AUTOREPLY_MODE_FLOOD,
+            autoReplyResolveMode(AUTOREPLY_MODE_DEFAULT, AUTOREPLY_MODE_PRIVATE, false));
+  // Silence needs no address, so a key is irrelevant to it.
+  EXPECT_EQ(AUTOREPLY_MODE_SILENT,
+            autoReplyResolveMode(AUTOREPLY_MODE_SILENT, AUTOREPLY_MODE_FLOOD, true));
+}
+
 TEST(ParseRequest, AReplyCanNeverTriggerAReply) {
   // The invariant the whole-string match used to guarantee for free. A reply body
   // begins with the bracketed requester name, or with "SNR" when there was none,
