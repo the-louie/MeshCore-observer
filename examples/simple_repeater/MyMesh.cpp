@@ -1145,6 +1145,59 @@ bool MyMesh::triggerProbe(const char* id, size_t id_len, uint8_t mode, char* rep
   return true;
 }
 
+// The requester's side of a private test: an anonymous request to one node, the
+// keyword and the echoed id after the sub-type byte, flooded and scoped exactly as
+// a channel probe is so a target with no path from here still hears it. The
+// answer comes back as a RESPONSE addressed to this node; the observer feed sees
+// it arrive, which is the measurement, whether or not this node can read it.
+bool MyMesh::triggerPrivateProbe(const char* pubkey_hex, const char* id, size_t id_len,
+                                 char* reply) {
+  // The key sits inside the command text, followed by the id when there is one,
+  // and fromHex wants it alone.
+  char key_hex[PUB_KEY_SIZE * 2 + 1];
+  memcpy(key_hex, pubkey_hex, PUB_KEY_SIZE * 2);
+  key_hex[PUB_KEY_SIZE * 2] = 0;
+  uint8_t key[PUB_KEY_SIZE];
+  mesh::Utils::fromHex(key, PUB_KEY_SIZE, key_hex);
+  mesh::Identity target(key);
+
+  uint8_t secret[PUB_KEY_SIZE];
+  self_id.calcSharedSecret(secret, target);
+
+  uint8_t inner[5 + AUTOREPLY_MAX_TEXT];
+  uint32_t tag = getRTCClock()->getCurrentTimeUnique();
+  memcpy(inner, &tag, 4);
+  inner[4] = ANON_REQ_TYPE_TEST;
+  size_t body_len = autoReplyBuildProbe((char *) &inner[5], sizeof(inner) - 5, NULL,
+                                        AUTOREPLY_KEYWORD, id, id_len);
+  if (body_len == 0) {
+    strcpy(reply, "Err - could not build request");
+    return false;
+  }
+
+  auto pkt = createAnonDatagram(PAYLOAD_TYPE_ANON_REQ, self_id, target, secret, inner,
+                                5 + body_len);
+  if (pkt == NULL) {
+    strcpy(reply, "Err - packet pool empty");
+    return false;
+  }
+
+  TransportKey scope;
+  if (resolveAutoReplyScope(&scope)) {
+    sendFloodScoped(scope, pkt, (uint32_t)0, (uint8_t)1);
+  } else {
+    sendFlood(pkt, (uint32_t)0, (uint8_t)1);
+  }
+
+  if (id != NULL && id_len > 0) {
+    snprintf(reply, MQTTCTRL_MAX_REPLY, "OK - private request sent to %.8s.., id %.*s",
+             pubkey_hex, (int)id_len, id);
+  } else {
+    snprintf(reply, MQTTCTRL_MAX_REPLY, "OK - private request sent to %.8s..", pubkey_hex);
+  }
+  return true;
+}
+
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
@@ -1733,6 +1786,7 @@ void MyMesh::buildStatsJson(char* buf, size_t buf_size) {
 
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
   const char* trigger_id = NULL;
+  const char* trigger_key = NULL;
   size_t trigger_id_len = 0;
   uint8_t trigger_mode = AUTOREPLY_MODE_DEFAULT;
   if (region_load_active) {
@@ -1859,6 +1913,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (autoReplyParseTrigger(command, AUTOREPLY_KEYWORD, &trigger_id, &trigger_id_len,
                                    &trigger_mode)) {
     triggerProbe(trigger_id, trigger_id_len, trigger_mode, reply);
+  } else if (autoReplyParsePrivateTrigger(command, &trigger_key, &trigger_id, &trigger_id_len)) {
+    triggerPrivateProbe(trigger_key, trigger_id, trigger_id_len, reply);
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

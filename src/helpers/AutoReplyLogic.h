@@ -263,6 +263,45 @@ static inline bool autoReplyParseTrigger(const char* command, const char* keywor
   return autoReplyMatchTrigger(command + plen, keyword, id, id_len, mode);
 }
 
+// Parse `trigger private <64 hex key> [<8 hex id>]`, the command that makes this node
+// send a private test request to the node with that key -- the requester's side of
+// the private exchange, over the same signed control plane the channel probe uses.
+// The key is the target's, not ours: our own goes in the packet by construction.
+// The id is echoed, never generated, for the reason autoReplyParseTrigger gives.
+// Matched as strictly as everything else here: one space between parts, exactly
+// 64 hex, then either the end or one space and exactly AUTOREPLY_ID_LEN hex.
+static inline bool autoReplyParsePrivateTrigger(const char* command, const char** pubkey_hex,
+                                                const char** id, size_t* id_len) {
+  *pubkey_hex = NULL;
+  *id = NULL;
+  *id_len = 0;
+  if (command == NULL) return false;
+
+  static const char PREFIX[] = "trigger private ";
+  const size_t plen = sizeof(PREFIX) - 1;
+  if (strncasecmp(command, PREFIX, plen) != 0) return false;
+
+  const char* key = command + plen;
+  size_t klen = 0;
+  while (isxdigit((unsigned char)key[klen])) klen++;
+  if (klen != 64) return false;
+  if (key[klen] == 0) {
+    *pubkey_hex = key;
+    return true;
+  }
+  if (key[klen] != ' ') return false;
+
+  const char* tail = key + klen + 1;
+  size_t n = 0;
+  while (n < AUTOREPLY_ID_LEN && isxdigit((unsigned char)tail[n])) n++;
+  if (n != AUTOREPLY_ID_LEN || tail[n] != 0) return false;
+
+  *pubkey_hex = key;
+  *id = tail;
+  *id_len = n;
+  return true;
+}
+
 // Build the probe body: the keyword alone, or the keyword and the echoed id, and
 // after either a mode letter and, for a private mode, the key the reply should
 // come back to -- this node's own.

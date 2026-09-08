@@ -672,6 +672,49 @@ TEST(ParsePrivateTest, HandlesNullsAndChat) {
   EXPECT_FALSE(autoReplyParsePrivateTest(text, "test", &id, &id_len));
 }
 
+// ---- the requester's side: `trigger private <key> [<id>]` ------------------
+
+TEST(PrivateTrigger, KeyAloneOrKeyAndId) {
+  const char* key = NULL; const char* id = NULL; size_t id_len = 0;
+  std::string cmd = std::string("trigger private ") + KEY;
+  EXPECT_TRUE(autoReplyParsePrivateTrigger(cmd.c_str(), &key, &id, &id_len));
+  ASSERT_NE(nullptr, key);
+  EXPECT_EQ(std::string(KEY), std::string(key, 64));
+  EXPECT_EQ(NULL, id);
+
+  cmd += " a1b2c3d4";
+  EXPECT_TRUE(autoReplyParsePrivateTrigger(cmd.c_str(), &key, &id, &id_len));
+  EXPECT_EQ(std::string(KEY), std::string(key, 64));   // the key is not NUL-terminated here
+  EXPECT_EQ(std::string("a1b2c3d4"), std::string(id, id_len));
+}
+
+TEST(PrivateTrigger, IsAsStrictAsTheRest) {
+  std::string k(KEY);
+  const std::string bad[] = {
+    "trigger private",                              // no key
+    "trigger private " + k.substr(0, 63),           // short key
+    "trigger private " + k + "A",                   // long key
+    "trigger private " + k.substr(0, 63) + "G",     // not hex
+    "trigger private " + k + " a1b2c3d",            // short id
+    "trigger private " + k + " a1b2c3d4 S",         // a mode has no place: the reply is private
+    "trigger private " + k + "  a1b2c3d4",          // two spaces
+    "trigger test " + k,                            // the wrong trigger for a key
+  };
+  for (const std::string& s : bad) {
+    const char* key = NULL; const char* id = NULL; size_t id_len = 0;
+    EXPECT_FALSE(autoReplyParsePrivateTrigger(s.c_str(), &key, &id, &id_len)) << s;
+    EXPECT_EQ(NULL, key) << s;
+  }
+  const char* key = NULL; const char* id = NULL; size_t id_len = 0;
+  EXPECT_FALSE(autoReplyParsePrivateTrigger(NULL, &key, &id, &id_len));
+}
+
+TEST(PrivateTrigger, IsCaseInsensitiveLikeTheOthers) {
+  const char* key = NULL; const char* id = NULL; size_t id_len = 0;
+  std::string cmd = std::string("TRIGGER Private ") + KEY;
+  EXPECT_TRUE(autoReplyParsePrivateTrigger(cmd.c_str(), &key, &id, &id_len));
+}
+
 // ---- reading an on/off argument --------------------------------------------
 
 TEST(ParseOnOff, AcceptsBothValuesInAnyCase) {

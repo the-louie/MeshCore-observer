@@ -300,6 +300,7 @@ protected:
   bool resolveAutoReplyScope(TransportKey* scope);
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);
   bool triggerProbe(const char* id, size_t id_len, uint8_t mode, char* reply);
+  bool triggerPrivateProbe(const char* pubkey_hex, const char* id, size_t id_len, char* reply);
 
 public:
   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables);

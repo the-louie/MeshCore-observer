@@ -255,6 +255,14 @@ TEST(Allowlist, AcceptsAutoReplyParametersAndTheTrigger) {
   EXPECT_TRUE(allowed("set autoreply.direct.flood off"));
   EXPECT_TRUE(allowed("get autoreply"));
   EXPECT_TRUE(allowed("get autoreply.channel"));
+  // The reply-mode work: a mode on the trigger, the standing mode, and the
+  // private request. Each rides an existing family or its own.
+  EXPECT_TRUE(allowed("trigger test a1b2c3d4 S"));
+  EXPECT_TRUE(allowed("set autoreply.mode private"));
+  EXPECT_TRUE(allowed("set autoreply.private on"));
+  EXPECT_TRUE(allowed("trigger private "
+                      "AA04792D7804529FABF230B32DC8F7FA494D1B3280F153B2215C305E4FD654DC a1b2c3d4"));
+  EXPECT_FALSE(allowed("triggerprivate x"));   // the boundary rule, as for the others
 }
 
 TEST(Allowlist, BlocksTheCommandsThatWouldOwnTheNode) {

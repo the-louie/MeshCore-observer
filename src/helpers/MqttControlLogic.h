@@ -341,7 +341,8 @@ static inline bool mqttCtrlCommandAllowed(const char* command, size_t len) {
     // and `set autoreply.hops 8` and `trigger test a1b2c3d4` both stop working.
     { "set autoreply", false },   // covers on|off and every autoreply.* setting
     { "get autoreply", false },
-    { "trigger test",  false },   // covers the optional 8-hex correlation id
+    { "trigger test",  false },   // covers the optional 8-hex correlation id and mode
+    { "trigger private", false }, // the target key, and the optional id after it
 
     // Reads. Each admits exactly the command it names. All read-only: they change
     // nothing and cannot be replayed into anything, which is what keeps the
