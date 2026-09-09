@@ -718,9 +718,15 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
       reply_len = handleAnonOwnerReq(sender, timestamp, &data[5]);
     } else if (data[4] == ANON_REQ_TYPE_BASIC && packet->isRouteDirect()) {
       reply_len = handleAnonClockReq(sender, timestamp, &data[5]);
-    } else if (data[4] == ANON_REQ_TYPE_TEST) {
+    } else if (data[4] == ANON_REQ_TYPE_TEST && len >= 5) {
       // Flood or direct: a requester that has no path to this node floods, and the
       // reply block below returns a path with the answer, as it does for a login.
+      //
+      // 'len >= 5' because the body length is 'len - 5', and a request too short to
+      // hold the sub-type byte would wrap that subtraction to a huge size_t. The
+      // read stayed inside the packet buffer even then -- the reply builder clamps
+      // it -- but what it parsed was stale stack, and a length that is only correct
+      // because something downstream truncates it is not a length.
       reply_len = handleAnonTestReq(packet, sender, &data[5], len - 5);
     } else {
       reply_len = 0;  // unknown/invalid request type

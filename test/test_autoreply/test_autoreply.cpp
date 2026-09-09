@@ -1154,3 +1154,15 @@ TEST(CommandIs, AShortCommandIsNotAMatch) {
   EXPECT_FALSE(autoReplyCommandIs("", "set autoreply.channel"));
   EXPECT_FALSE(autoReplyCommandIs("set", "set autoreply.channel"));
 }
+
+TEST(ParsePrivateTest, AnEmptyBodyIsNotARequest) {
+  // What a length-underflowed call would hand the parser: nothing, or a fragment.
+  // Neither is a request, and neither may be answered.
+  const char* id; size_t id_len;
+  char empty[8] = "";
+  char one[8]   = "t";
+  char part[8]  = "tes";
+  EXPECT_FALSE(autoReplyParsePrivateTest(empty, "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParsePrivateTest(one, "test", &id, &id_len));
+  EXPECT_FALSE(autoReplyParsePrivateTest(part, "test", &id, &id_len));
+}
