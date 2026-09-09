@@ -1,13 +1,19 @@
-# 📡 MeshCore Observer — with repeater auto-reply
+# 📡 MeshCore Observer — with repeater auto-reply and signed remote control
 
-**This is the standard [MeshCore Observer](https://observer.gessaman.com/) firmware, plus one
-feature.** Everything Observer does is still here and unchanged — MQTT uplink to all six
+**This is the standard [MeshCore Observer](https://observer.gessaman.com/) firmware, plus two
+features.** Everything Observer does is still here and unchanged — MQTT uplink to all six
 broker slots, WiFi and timezone config, fault alerts, the web flasher config portal. If you
 already run an Observer repeater, nothing you have set up changes.
 
-The addition: **your repeaters answer the word `test` with a signal report.** Anyone in
-range can check coverage by sending one message. No login, no contact setup, no admin
-rights, nothing to install.
+The two additions:
+
+1. **Auto-reply.** Your repeaters answer the word `test` with a signal report. Anyone in
+   range can check coverage by sending one message. No login, no contact setup, no admin
+   rights, nothing to install.
+2. **Remote control over MQTT.** You can change a repeater's settings, or ask it to send a
+   test, with a signed message published to the broker — instead of driving to it. **Off by
+   default**, and inert until you provision a key. Read the next section before you turn it
+   on; it is the part of this firmware that deserves your attention.
 
 ```
 you        test
@@ -21,7 +27,83 @@ brackets, so when several people test at once everyone can find their own reply.
 
 ---
 
-## Turning it on — three steps
+## Remote control, and the key that secures it
+
+Flashing a fleet takes months. This exists so that changing a setting afterwards costs a
+signed publish rather than another round of climbing towers.
+
+**Start from the threat model, because it is unusual.** Public MeshCore MQTT brokers publish
+their credentials — `mqtt.meshat.se` does. **Anyone can publish to any topic on them.** So
+this feature trusts the transport with nothing at all. Reaching a node's command topic is not
+a permission; it is the starting position everyone already has.
+
+### Two separate keypairs. Do not confuse them.
+
+| | **Your node's mesh identity** | **Your owner signing key** |
+|---|---|---|
+| What it is | The repeater's own keypair, the one it has always had | A keypair **you** generate, for commanding your fleet |
+| What it does | Mesh addressing, encryption, direct messages | Signs remote commands |
+| Where the **private** half lives | On the node | **With you. Never on a node, never at the broker.** |
+| Where the **public** half lives | Advertised on the mesh | On each node you provision, as `mqtt.owner` |
+
+**A node never holds a secret that can command anything — not even itself.** It stores 64 hex
+characters: the *public* half of your signing key. That is enough to check a signature and
+useless for making one. Somebody who steals a repeater, dumps its flash, or reads every byte
+the broker has ever carried still cannot issue a single command to any node, including the one
+they took apart.
+
+This is a different key from the node's mesh identity, on purpose. The mesh identity is
+published — it is how the node is addressed. A published key cannot also be the key that
+authorises commands.
+
+### Turning it on
+
+```
+set mqtt.owner <64 hex characters>    # serial only — the PUBLIC half of your signing key
+set mqtt.cmd on
+get mqtt.cmd                          # state, and the highest command counter seen
+```
+
+Both are needed. `mqtt.cmd on` with no owner key refuses everything. **`set mqtt.owner` cannot
+be done remotely** — only over serial or the local console — so a remote attacker cannot point
+a node at their own key.
+
+To turn it off again: `set mqtt.cmd off`.
+
+### What a node checks before it obeys
+
+In this order, and it stops at the first failure:
+
+1. the feature is on, and an owner key is provisioned
+2. the **Ed25519 signature** verifies against that key — over the topic *and* the payload
+   together, so a command signed for one node cannot be replayed at another, and a per-node
+   command cannot be replayed as a broadcast
+3. the **counter** is strictly greater than the highest one this node has stored — a captured
+   command cannot be replayed later. The counter is stored *before* the command runs
+4. the command has **not expired**, and a node with no trusted clock fails closed
+5. the **rate limit** — 20 commands an hour, of which at most 4 may transmit. This applies to
+   *validly signed* commands: even your own key cannot turn a repeater into a flood weapon
+6. the command is on a short **allowlist** — the auto-reply settings, a few read-only `get`s,
+   and the two `trigger` commands. Everything else is refused before it reaches the CLI.
+   There is no general `set`, no `erase`, and no way to change the owner key
+
+Two things are deliberately out of reach of the remote path no matter what it carries:
+`set prv.key`, `erase` and `set mqtt.owner`, which require a locally-privileged caller; and a
+broadcast that would make every node transmit at once.
+
+### What this does not defend against
+
+**Availability.** Anyone can flood the broker, and the node's rate limit is what bounds the
+airtime that costs you — not the broker traffic. **Confidentiality of commands.** The envelope
+is signed, not encrypted: anyone watching the broker can read what you asked a node to do.
+Nothing secret should travel this way, and nothing does.
+
+Full detail, including the wire format and every refusal code, is in
+[`docs/mqtt-control.md`](docs/mqtt-control.md).
+
+---
+
+## Auto-reply: turning it on — three steps
 
 **1. Flash a repeater with this firmware.** Grab the file for your board from this repo's
 [Releases](../../releases) page.
@@ -63,18 +145,77 @@ To turn it off again: `set autoreply off`.
 | `set autoreply on\|off` | `off` | Whether this repeater answers the trigger. |
 | `set autoreply.hops <0-63>` | `8` | How many hops away a request may be and still get an answer. `0` = direct neighbours only. |
 | `set autoreply.direct.flood on\|off` | `on` | Whether a request that arrived direct is answered with a flood. `off` sends a single zero-hop packet that no repeater relays — cheapest, but it never reaches anyone who cannot hear this repeater directly. |
+| `set autoreply.delay <1-120>` | `4` | How widely replies are spread in time. Every repeater that hears a request is about to answer it, and without a spread their replies land on top of each other. The wait is random, up to roughly 2.3 s x this number — so `4` spreads answers over about 9 seconds and `120` over about four and a half minutes. Nobody is waiting on a test, so err high: with a dozen repeaters answering, `4` is far too tight. |
+| `set autoreply.region <code>` | *(request scope)* | Which region replies are scoped to. Empty mirrors whatever scope the request arrived under. |
 | `set autoreply.mode flood\|private\|direct` | `flood` | How a request that names no mode is answered. `private` and `direct` answer with a text message to the requester alone, and only when the request carries their key. |
 | `set autoreply.private on\|off` | `off` | Whether a test request sent to this repeater alone, off the channel, is answered. Off because it is an unauthenticated packet that makes the node transmit. |
 | `get autoreply` | — | Current state, in one line. |
 | `get autoreply.channel` | — | The channel name. **Read-only** — it follows `set mqtt.iata`. |
 | `get autoreply.hops` | — | Read the hop limit back. |
 | `get autoreply.direct.flood` | — | Read the direct-reply mode back. |
+| `get autoreply.delay` | — | Read the spread back. |
+| `get autoreply.region` | — | Read the reply scope back. |
 | `get autoreply.mode` | — | Read the standing mode back. |
 | `get autoreply.private` | — | Read the private-request switch back. |
 
 The trigger word is `test`, case-insensitive — `test`, `Test` and `TEST` all work, which
 matters because phone keyboards like to capitalise the first letter. Override it at build
 time with `-D AUTOREPLY_KEYWORD='"..."'`.
+
+Remote control reaches all of these: `set autoreply` and `get autoreply` are on the allowlist
+as families, so `set autoreply.delay 30` can be published to a node instead of typed into it.
+
+---
+
+## Reply modes — asking for the answer you want
+
+A bare `test` is answered the way the node is configured, and that is all most people need.
+A request can also **name how it wants to be answered**, which is what the modes are for:
+
+```
+test                     answered the node's standing way
+test A1B2C3D4            the same, with an id echoed back so you can match reply to request
+test A1B2C3D4 F          answer on the channel, where everyone sees it
+test A1B2C3D4 P          answer me privately
+test A1B2C3D4 D          answer me privately, straight back down the path this came in on
+test A1B2C3D4 S          do not answer at all
+```
+
+| Mode | What the repeater does | What it costs the mesh |
+|---|---|---|
+| **F — Flood** | Answers on `#test-<iata>`, where everyone in the region sees it. The default, and what every node did before modes existed. | The most: one flooded reply per repeater that heard you. |
+| **P — Private** | Answers with a text message addressed to you alone, flood-routed so it finds you wherever you are. | One reply, but it still floods to find a path. |
+| **D — Private Direct** | The same private answer, sent straight back down the path your request arrived on. | The least of the three that answer — no flood at all. The trade: the reverse path can fail where a flood would not, because this mesh is asymmetric. |
+| **S — Silent** | Answers nothing. The node still *heard* you, and still reports the reception over its MQTT uplink. | Nothing on the air. |
+
+**P and D need your public key**, appended to the request, because a channel message carries
+no sender key and a repeater has no name-to-key table to look you up in. A `P` or `D` request
+without one is answered as **F** rather than dropped — a probe is never left unanswered
+because it asked for something the node could not do.
+
+**S is per-request only.** There is no standing "silent" mode, because that is what
+`set autoreply off` already is.
+
+The standing mode is `set autoreply.mode flood|private|direct`. A request that names a mode
+overrides it for that request only.
+
+### Mode M — a test that never touches the channel
+
+The modes above all *arrive* on `#test-<iata>`, in the open. **Mode M is the private
+counterpart**: the request is sent to one repeater alone, off the channel entirely, and is
+answered the same way. Nothing about the exchange appears on the test channel.
+
+This sidesteps the key problem that P and D have, because the request packet carries the
+sender's key by construction — there is nothing to append and nothing to get wrong.
+
+It is **off by default** (`set autoreply.private on`), and it is the one switch here worth
+thinking about before you flip it: unlike a channel request, it is an unauthenticated packet
+sent to your node alone that makes it transmit. The guards are a cooldown charged to the
+requester's *key* rather than a name — one answer per key per five minutes — and a budget for
+the private path of its own, ten answers per five minutes, which is what bounds somebody
+cycling through fresh keys. A request refused by either gets nothing back.
+
+Full detail on all five in [`docs/autoreply.md`](docs/autoreply.md).
 
 ---
 
