@@ -364,9 +364,20 @@ A request may reach the repeater either way, and the answer travels accordingly:
 set — the gate every reply shares, since a node with no region has no auto-reply at all.
 `autoreply.hops` does not apply: it bounds which of the requests every repeater hears this one
 answers, and a private request was addressed to this node and nobody else, so distance is not
-a reason to leave it unanswered — the hop count is reported, not judged. Nor does
-`autoreply.delay`: one node was asked, there is no storm to spread, and the answer leaves after
-the short fixed wait every anonymous request gets.
+a reason to leave it unanswered — the hop count is reported, not judged.
+
+**`autoreply.delay` does apply.** It governs every reply this firmware sends, private or not.
+One requester asking one node makes no storm, and for that case the delay buys nothing — but
+the request does not have to arrive alone. Several observers can be told to probe the same
+node, or a fleet of them told to probe at once, and without the stagger every answer would
+leave on the same instant, which is the collision the setting exists to prevent. The cost of
+being wrong in the other direction is nothing: nobody is waiting on a private test.
+
+The four requests that share this code path — a login, a regions query, an owner query and a
+clock query — are **not** staggered, and must never be: a person is watching a screen for
+those, and a mesh-wide delay would read as a dead node. They keep the short fixed wait every
+anonymous request has always had. A host test pins that separation across the whole sub-type
+byte range, because a login carries a password in the same position.
 
 **Charged to the key.** The cooldown is charged to the requester's key rather than to a name:
 one answer per key per five minutes, in a ring of the last 16 keys, the same window and the
