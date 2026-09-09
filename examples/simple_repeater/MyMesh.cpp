@@ -60,7 +60,7 @@
 #define ANON_REQ_TYPE_REGIONS      0x01
 #define ANON_REQ_TYPE_OWNER        0x02
 #define ANON_REQ_TYPE_BASIC        0x03   // just remote clock
-#define ANON_REQ_TYPE_TEST         0x04   // a private test request: the auto-reply report, to the sender alone
+#define ANON_REQ_TYPE_TEST         AUTOREPLY_ANON_TEST_SUBTYPE   // a private test request: the auto-reply report, to the sender alone
 
 #define CLI_REPLY_DELAY_MILLIS      600
 
@@ -686,6 +686,19 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
   return Mesh::onRecvPacket(pkt);
 }
 
+// How long an anon reply waits before it goes out. An admin request answers on the
+// fixed SERVER_RESPONSE_DELAY it always has. A test request answers on the same
+// random, widened stagger the channel reply uses -- every repeater that heard the
+// request is about to answer it, and their replies otherwise land on top of each
+// other. delayFactor() is bounded 1..120, so the staggered value is never zero and
+// never silently becomes the immediate path.
+uint32_t MyMesh::anonReplyDelay(const mesh::Packet* reply, bool stagger) {
+  if (!stagger) return SERVER_RESPONSE_DELAY;
+  uint32_t delay_millis = getRetransmitDelay(reply) * auto_reply.delayFactor();
+  MESH_DEBUG_PRINTLN("AutoReply: answering private test in %d ms", (uint32_t)delay_millis);
+  return delay_millis;
+}
+
 void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,
                             uint8_t *data, size_t len) {
   if (packet->getPayloadType() == PAYLOAD_TYPE_ANON_REQ) { // received an initial request by a possible admin
@@ -715,17 +728,24 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
 
     if (reply_len == 0) return;   // invalid request
 
+    // A test request is an auto-reply and waits its turn; everything else here has
+    // somebody watching a screen for the answer and goes out at once. The stagger is
+    // the same one the channel and private-DM replies use, so 'set autoreply.delay'
+    // now governs every reply this node sends, and a fleet-wide 'trigger private'
+    // spreads out instead of landing on one instant.
+    const bool stagger = autoReplyAnonReplyIsStaggered(data[4]);
+
     if (packet->isRouteFlood()) {
       // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
       mesh::Packet* path = createPathReturn(sender, secret, packet->path, packet->path_len,
                                             PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
-      if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+      if (path) sendFloodReply(path, anonReplyDelay(path, stagger), packet->getPathHashSize());
     } else if (reply_path_len == 0xFF) {
       mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
-      if (reply) sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+      if (reply) sendFloodReply(reply, anonReplyDelay(reply, stagger), packet->getPathHashSize());
     } else {
       mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
-      if (reply) sendDirect(reply, reply_path, reply_path_len, SERVER_RESPONSE_DELAY);
+      if (reply) sendDirect(reply, reply_path, reply_path_len, anonReplyDelay(reply, stagger));
     }
   }
 }

@@ -260,6 +260,7 @@ protected:
   void logTxFail(mesh::Packet* pkt, int len) override;
   int calcRxDelay(float score, uint32_t air_time) const override;
 
+  uint32_t anonReplyDelay(const mesh::Packet* reply, bool stagger);
   uint32_t getRetransmitDelay(const mesh::Packet* packet) override;
   uint32_t getDirectRetransmitDelay(const mesh::Packet* packet) override;
 
