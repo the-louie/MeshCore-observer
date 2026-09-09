@@ -1135,3 +1135,22 @@ TEST(AnonStagger, NoOtherByteWaits) {
     EXPECT_FALSE(autoReplyAnonReplyIsStaggered((uint8_t)b)) << "byte " << b;
   }
 }
+
+TEST(CommandIs, APrefixIsNotTheWholeCommand) {
+  // The bug this exists to stop: a bare memcmp accepts anything beginning with the
+  // name, so an operator's typo is answered as though it were the command.
+  EXPECT_TRUE(autoReplyCommandIs("set autoreply.channel", "set autoreply.channel"));
+  EXPECT_TRUE(autoReplyCommandIs("set autoreply.channel ", "set autoreply.channel"));
+  EXPECT_TRUE(autoReplyCommandIs("set autoreply.channel 3", "set autoreply.channel"));
+
+  EXPECT_FALSE(autoReplyCommandIs("set autoreply.channelfoo", "set autoreply.channel"));
+  EXPECT_FALSE(autoReplyCommandIs("set autoreply.channels", "set autoreply.channel"));
+}
+
+TEST(CommandIs, AShortCommandIsNotAMatch) {
+  // And it must decide that from the bytes that exist, not from whatever follows
+  // the terminator.
+  EXPECT_FALSE(autoReplyCommandIs("set autoreply.chan", "set autoreply.channel"));
+  EXPECT_FALSE(autoReplyCommandIs("", "set autoreply.channel"));
+  EXPECT_FALSE(autoReplyCommandIs("set", "set autoreply.channel"));
+}

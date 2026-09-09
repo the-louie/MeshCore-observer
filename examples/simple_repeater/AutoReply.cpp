@@ -212,7 +212,7 @@ bool AutoReply::handleCommand(const char* iata, const char* command, char* reply
     return true;
   }
 
-  if (memcmp(command, "set autoreply.channel", 21) == 0) {
+  if (autoReplyCommandIs(command, "set autoreply.channel")) {
     strcpy(reply, "Err - channel is automatic, set mqtt.iata");
     return true;
   }

@@ -538,3 +538,16 @@ static inline bool autoReplyReplyIsZeroHop(uint8_t hop_count, bool direct_flood)
 static inline bool autoReplyAnonReplyIsStaggered(uint8_t sub_type) {
   return sub_type == AUTOREPLY_ANON_TEST_SUBTYPE;
 }
+
+// A command matched with memcmp alone accepts anything that starts with it, so a
+// test for "set autoreply.channel" also swallows "set autoreply.channelfoo". The
+// commands that take an argument end in a space and match at a boundary by
+// construction; a command that takes none has no boundary unless it is given one.
+//
+// strncmp rather than memcmp because it stops at the terminator: a command shorter
+// than the name being tested compares only the bytes that exist, instead of reading
+// whatever follows it in the buffer.
+static inline bool autoReplyCommandIs(const char* command, const char* name) {
+  size_t n = strlen(name);
+  return strncmp(command, name, n) == 0 && (command[n] == 0 || command[n] == ' ');
+}
