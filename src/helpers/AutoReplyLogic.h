@@ -519,3 +519,22 @@ static inline bool autoReplyHopsAllowed(uint8_t hop_count, uint8_t max_hops) {
 static inline bool autoReplyReplyIsZeroHop(uint8_t hop_count, bool direct_flood) {
   return hop_count == 0 && !direct_flood;
 }
+
+// Mode M's answer rides the same block that answers a login, a regions query, an
+// owner query and a clock query, and that block sends everything on one fixed
+// delay. Only the test is an auto-reply. Only the test is staggered.
+//
+// The distinction matters in one direction: a login, regions, owner or clock
+// request has a person waiting at a keyboard for it, and making them sit through a
+// mesh-wide stagger measured in tens of seconds would read as a dead node, not as
+// politeness. A test has nobody waiting, and every repeater in range answers the
+// same request, which is exactly the case the stagger exists for.
+//
+// The sub-type is data[4] of the request. A login is identified by that byte being
+// 0 (an empty password) or any printable character, so the safe rule is the narrow
+// one: stagger the test sub-type and nothing else.
+#define AUTOREPLY_ANON_TEST_SUBTYPE 0x04
+
+static inline bool autoReplyAnonReplyIsStaggered(uint8_t sub_type) {
+  return sub_type == AUTOREPLY_ANON_TEST_SUBTYPE;
+}

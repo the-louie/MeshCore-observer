@@ -1105,3 +1105,33 @@ TEST(BuildProbe, RefusesRatherThanTruncatingAName) {
   char out[16];
   EXPECT_EQ(0u, autoReplyBuildProbe(out, sizeof(out), "SE-JKG-LOUTEST", "test", "A1B2C3D4", 8));
 }
+
+TEST(AnonStagger, OnlyTheTestSubTypeWaits) {
+  // The one thing this predicate exists to prevent: an admin command answered on a
+  // mesh stagger. Everything the anon block serves except the test must go out at
+  // once.
+  EXPECT_TRUE(autoReplyAnonReplyIsStaggered(AUTOREPLY_ANON_TEST_SUBTYPE));
+  EXPECT_TRUE(autoReplyAnonReplyIsStaggered(0x04));
+
+  EXPECT_FALSE(autoReplyAnonReplyIsStaggered(0x00));  // login, empty password
+  EXPECT_FALSE(autoReplyAnonReplyIsStaggered(0x01));  // regions
+  EXPECT_FALSE(autoReplyAnonReplyIsStaggered(0x02));  // owner
+  EXPECT_FALSE(autoReplyAnonReplyIsStaggered(0x03));  // clock
+}
+
+TEST(AnonStagger, APasswordIsNeverATestSubType) {
+  // A login carries a password in the same byte, so every printable character has
+  // to fall through to the immediate path. 0x04 is not printable and cannot collide.
+  for (int c = 0x20; c <= 0x7E; c++) {
+    EXPECT_FALSE(autoReplyAnonReplyIsStaggered((uint8_t)c)) << "printable " << c;
+  }
+}
+
+TEST(AnonStagger, NoOtherByteWaits) {
+  // An unknown sub-type gets no reply at all, but if that ever changes it must not
+  // inherit the stagger by accident.
+  for (int b = 0; b <= 0xFF; b++) {
+    if (b == AUTOREPLY_ANON_TEST_SUBTYPE) continue;
+    EXPECT_FALSE(autoReplyAnonReplyIsStaggered((uint8_t)b)) << "byte " << b;
+  }
+}
